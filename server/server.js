@@ -755,6 +755,18 @@ app.post("/api/bookings/waiver", upload.single("photoId"), (req, res) => {
               }
 
               const bookingId = this.lastID
+
+              sendAdminApprovalEmail({
+  id: bookingId,
+  rental_label: rentalLabel,
+  date,
+  rentalTime,
+  customerEmail: normalizedCustomerEmail,
+  booking_status: "pending_approval",
+}).catch((err) => {
+  console.error("ADMIN APPROVAL EMAIL ERROR:", err)
+})
+
               const depositUrl = formatDepositRequestUrl(bookingId)
 
               Promise.allSettled([
