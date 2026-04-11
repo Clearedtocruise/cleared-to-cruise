@@ -18,20 +18,49 @@ const Stripe = require("stripe")
 const nodemailer = require("nodemailer")
 
 const app = express()
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://clearedtocruiserentals.com",
-    "https://www.clearedtocruiserentals.com"
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  allowedHeaders: ["Content-Type"]
-}))
 
 const PORT = Number(process.env.PORT || 5001)
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173"
-const SITE_URL = process.env.SITE_URL || CLIENT_URL
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
+const CLIENT_URL = (process.env.CLIENT_URL || "http://localhost:5173").replace(/\/$/, "")
+const SITE_URL = (process.env.SITE_URL || CLIENT_URL).replace(/\/$/, "")
+const API_URL = (process.env.API_URL || `http://localhost:${PORT}`).replace(/\/$/, "")
+const ADMIN_ACTION_TOKEN = String(process.env.ADMIN_ACTION_TOKEN || "").trim()
+const ADMIN_NOTIFICATION_EMAIL =
+  String(process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER || "").trim()
+
+if (!process.env.STRIPE_SECRET_KEY) {
+  console.warn("WARNING: STRIPE_SECRET_KEY is not set.")
+}
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "")
+
+// -----------------------------
+// CORS
+// -----------------------------
+const allowedOrigins = [
+  CLIENT_URL,
+  SITE_URL,
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+  "https://clearedtocruiserentals.com",
+  "https://www.clearedtocruiserentals.com",
+  "https://cleared-to-cruise.vercel.app",
+]
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true)
+      }
+      return callback(new Error(`CORS not allowed for origin: ${origin}`))
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-admin-token"],
+    credentials: true,
+  })
+)
 
 // -----------------------------
 // EMAIL
@@ -48,6 +77,11 @@ const mailer =
     : null
 
 async function sendEmail({ to, subject, text, html }) {
+  if (!to) {
+    console.warn("Email skipped: missing recipient.")
+    return
+  }
+
   if (!mailer) {
     console.warn("Email skipped: mailer not configured.")
     return
@@ -71,32 +105,27 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;")
 }
 
-// -----------------------------
-// CORS
-// -----------------------------
-const allowedOrigins = [
-  SITE_URL,
-  CLIENT_URL,
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "http://localhost:4173",
-  "http://127.0.0.1:4173",
-  "https://clearedtocruiserentals.com",
-  "https://www.clearedtocruiserentals.com",
-  "https://cleared-to-cruise.vercel.app",
-]
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase()
+}
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true)
-      }
-      return callback(new Error("CORS not allowed"))
-    },
-    credentials: true,
-  })
-)
+function statusLabel(value) {
+  return String(value || "").replaceAll("_", " ")
+}
+
+function requireAdminToken(req, res, next) {
+  if (!ADMIN_ACTION_TOKEN) {
+    return res.status(500).send("ADMIN_ACTION_TOKEN is not configured on the server.")
+  }
+
+  const token = String(req.query.token || req.headers["x-admin-token"] || "").trim()
+
+  if (!token || token !== ADMIN_ACTION_TOKEN) {
+    return res.status(403).send("Forbidden")
+  }
+
+  next()
+}
 
 // -----------------------------
 // STRIPE WEBHOOK FIRST
@@ -145,22 +174,19 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
               return
             }
 
-            db.get(
-              `SELECT * FROM bookings WHERE id = ?`,
-              [bookingId],
-              async (_lookupErr, booking) => {
-                if (!booking) return
+            db.get(`SELECT * FROM bookings WHERE id = ?`, [bookingId], async (_lookupErr, booking) => {
+              if (!booking) return
 
-                const safeRental = escapeHtml(booking.rentalLabel || "Boat Rental")
-                const safeDate = escapeHtml(booking.date || "Not provided")
-                const safeTime = escapeHtml(booking.rentalTime || "Not provided")
+              const safeRental = escapeHtml(booking.rentalLabel || "Boat Rental")
+              const safeDate = escapeHtml(booking.date || "Not provided")
+              const safeTime = escapeHtml(booking.rentalTime || "Not provided")
 
-                try {
-                  if (booking.customerEmail) {
-                    await sendEmail({
-                      to: booking.customerEmail,
-                      subject: `Payment received for booking #${booking.id}`,
-                      text: `
+              try {
+                if (booking.customerEmail) {
+                  await sendEmail({
+                    to: booking.customerEmail,
+                    subject: `Payment received for booking #${booking.id}`,
+                    text: `
 Your payment has been received.
 
 Booking ID: ${booking.id}
@@ -168,22 +194,22 @@ Rental: ${booking.rentalLabel || "Boat Rental"}
 Date: ${booking.date || "Not provided"}
 Time: ${booking.rentalTime || "Not provided"}
 Status: ${booking.status || "confirmed"}
-                      `.trim(),
-                      html: `
-                        <h2>Payment received</h2>
-                        <p><strong>Booking ID:</strong> ${booking.id}</p>
-                        <p><strong>Rental:</strong> ${safeRental}</p>
-                        <p><strong>Date:</strong> ${safeDate}</p>
-                        <p><strong>Time:</strong> ${safeTime}</p>
-                        <p><strong>Status:</strong> ${escapeHtml(booking.status || "confirmed")}</p>
-                      `,
-                    })
-                  }
+                    `.trim(),
+                    html: `
+                      <h2>Payment received</h2>
+                      <p><strong>Booking ID:</strong> ${booking.id}</p>
+                      <p><strong>Rental:</strong> ${safeRental}</p>
+                      <p><strong>Date:</strong> ${safeDate}</p>
+                      <p><strong>Time:</strong> ${safeTime}</p>
+                      <p><strong>Status:</strong> ${escapeHtml(booking.status || "confirmed")}</p>
+                    `,
+                  })
+                }
 
-                  await sendEmail({
-                    to: process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER,
-                    subject: `Rental payment received for booking #${booking.id}`,
-                    text: `
+                await sendEmail({
+                  to: ADMIN_NOTIFICATION_EMAIL,
+                  subject: `Rental payment received for booking #${booking.id}`,
+                  text: `
 Rental payment received.
 
 Booking ID: ${booking.id}
@@ -192,22 +218,21 @@ Email: ${booking.customerEmail || "No email"}
 Rental: ${booking.rentalLabel || "Boat Rental"}
 Date: ${booking.date || "Not provided"}
 Time: ${booking.rentalTime || "Not provided"}
-                    `.trim(),
-                    html: `
-                      <h2>Rental payment received</h2>
-                      <p><strong>Booking ID:</strong> ${booking.id}</p>
-                      <p><strong>Name:</strong> ${escapeHtml(booking.waiverPrintedName || "No name")}</p>
-                      <p><strong>Email:</strong> ${escapeHtml(booking.customerEmail || "No email")}</p>
-                      <p><strong>Rental:</strong> ${safeRental}</p>
-                      <p><strong>Date:</strong> ${safeDate}</p>
-                      <p><strong>Time:</strong> ${safeTime}</p>
-                    `,
-                  })
-                } catch (emailErr) {
-                  console.error("WEBHOOK PAYMENT EMAIL ERROR:", emailErr)
-                }
+                  `.trim(),
+                  html: `
+                    <h2>Rental payment received</h2>
+                    <p><strong>Booking ID:</strong> ${booking.id}</p>
+                    <p><strong>Name:</strong> ${escapeHtml(booking.waiverPrintedName || "No name")}</p>
+                    <p><strong>Email:</strong> ${escapeHtml(booking.customerEmail || "No email")}</p>
+                    <p><strong>Rental:</strong> ${safeRental}</p>
+                    <p><strong>Date:</strong> ${safeDate}</p>
+                    <p><strong>Time:</strong> ${safeTime}</p>
+                  `,
+                })
+              } catch (emailErr) {
+                console.error("WEBHOOK PAYMENT EMAIL ERROR:", emailErr)
               }
-            )
+            })
           }
         )
       }
@@ -245,6 +270,7 @@ Time: ${booking.rentalTime || "Not provided"}
 
             db.get(`SELECT * FROM bookings WHERE id = ?`, [bookingId], async (_e, booking) => {
               if (!booking) return
+
               try {
                 if (booking.customerEmail) {
                   await sendEmail({
@@ -361,13 +387,13 @@ function rentalBasePrice(label) {
     case "Jet Ski (Double)":
       return 75000
     case "Pontoon - 6 Hours":
-      return 90000
+      return 60000
     case "Pontoon - 8 Hours":
-      return 110000
+      return 75000
     case "Pontoon - 10 Hours":
-      return 130000
-    case "Bass Boat - Full Day":
       return 90000
+    case "Bass Boat - Full Day":
+      return 40000
     default:
       return 0
   }
@@ -383,12 +409,20 @@ function totalPrice(booking) {
   return rentalBasePrice(booking.rentalLabel) + towFeeForLocation(booking.towLocation)
 }
 
-function normalizeEmail(value) {
-  return String(value || "").trim().toLowerCase()
+function formatDepositRequestUrl(bookingId) {
+  return `${SITE_URL}/deposit/${bookingId}`
 }
 
-function formatDepositRequestUrl(bookingId) {
-  return `${SITE_URL.replace(/\/$/, "")}/deposit/${bookingId}`
+function adminApproveUrl(bookingId) {
+  return `${API_URL}/api/admin/approve/${bookingId}?token=${encodeURIComponent(ADMIN_ACTION_TOKEN)}`
+}
+
+function adminDenyUrl(bookingId) {
+  return `${API_URL}/api/admin/deny/${bookingId}?token=${encodeURIComponent(ADMIN_ACTION_TOKEN)}`
+}
+
+function adminViewUrl() {
+  return `${SITE_URL}/admin`
 }
 
 function isWithinNextThreeDays(dateValue) {
@@ -398,6 +432,66 @@ function isWithinNextThreeDays(dateValue) {
   const diffMs = target.getTime() - now.getTime()
   const diffDays = diffMs / (1000 * 60 * 60 * 24)
   return diffDays <= 3
+}
+
+async function sendAdminApprovalEmail(booking) {
+  const approveUrl = adminApproveUrl(booking.id)
+  const denyUrl = adminDenyUrl(booking.id)
+  const photoUrl = booking.photoIdPath
+    ? `${API_URL}/${String(booking.photoIdPath).replace(/^\.?\//, "")}`
+    : ""
+
+  return sendEmail({
+    to: ADMIN_NOTIFICATION_EMAIL,
+    subject: `Approve or deny booking #${booking.id}`,
+    text: `
+A new booking requires review.
+
+Booking ID: ${booking.id}
+Name: ${booking.waiverPrintedName || "No name"}
+Email: ${booking.customerEmail || "No email"}
+Rental: ${booking.rentalLabel || "Boat Rental"}
+Date: ${booking.date || "Not provided"}
+Time: ${booking.rentalTime || "Not provided"}
+Tow Location: ${booking.towLocation || "None"}
+Status: ${statusLabel(booking.status || "pending_approval")}
+
+Approve:
+${approveUrl}
+
+Deny:
+${denyUrl}
+
+Admin page:
+${adminViewUrl()}
+
+Photo ID:
+${photoUrl || "Not available"}
+    `.trim(),
+    html: `
+      <h2>New booking requires review</h2>
+      <p><strong>Booking ID:</strong> ${booking.id}</p>
+      <p><strong>Name:</strong> ${escapeHtml(booking.waiverPrintedName || "No name")}</p>
+      <p><strong>Email:</strong> ${escapeHtml(booking.customerEmail || "No email")}</p>
+      <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
+      <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
+      <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
+      <p><strong>Tow Location:</strong> ${escapeHtml(booking.towLocation || "None")}</p>
+      <p><strong>Status:</strong> ${escapeHtml(statusLabel(booking.status || "pending_approval"))}</p>
+      ${
+        photoUrl
+          ? `<p><strong>Photo ID:</strong> <a href="${photoUrl}" target="_blank" rel="noopener noreferrer">View uploaded ID</a></p>`
+          : ""
+      }
+      <div style="margin-top:24px;">
+        <a href="${approveUrl}" style="display:inline-block;padding:12px 18px;background:#157347;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;margin-right:10px;">Approve Booking</a>
+        <a href="${denyUrl}" style="display:inline-block;padding:12px 18px;background:#b42318;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">Deny Booking</a>
+      </div>
+      <p style="margin-top:18px;">
+        <a href="${adminViewUrl()}" target="_blank" rel="noopener noreferrer">Open admin page</a>
+      </p>
+    `,
+  })
 }
 
 // -----------------------------
@@ -525,7 +619,6 @@ db.serialize(() => {
     }
   })
 
-  // Start IDs around 1000
   db.get(`SELECT seq FROM sqlite_sequence WHERE name = 'bookings'`, [], (err, row) => {
     if (err) return
     if (!row) {
@@ -639,7 +732,6 @@ app.post("/api/bookings/lookup", async (req, res) => {
 // -----------------------------
 app.post("/api/bookings/waiver", upload.single("photoId"), (req, res) => {
   console.log("BOOKING REQUEST FILE:", req.file ? req.file.filename : "NO FILE")
-  console.log("BOOKING REQUEST FILE:", req.file?.filename)
 
   const {
     rentalLabel,
@@ -705,7 +797,9 @@ app.post("/api/bookings/waiver", upload.single("photoId"), (req, res) => {
           }
 
           if ((existingRow?.count || 0) > 0) {
-            return res.status(409).json({ error: "That rental is already booked or pending for the selected date." })
+            return res
+              .status(409)
+              .json({ error: "That rental is already booked or pending for the selected date." })
           }
 
           db.run(
@@ -755,23 +849,27 @@ app.post("/api/bookings/waiver", upload.single("photoId"), (req, res) => {
               }
 
               const bookingId = this.lastID
-
-              sendAdminApprovalEmail({
-  id: bookingId,
-  rental_label: rentalLabel,
-  date,
-  rentalTime,
-  customerEmail: normalizedCustomerEmail,
-  booking_status: "pending_approval",
-}).catch((err) => {
-  console.error("ADMIN APPROVAL EMAIL ERROR:", err)
-})
-
               const depositUrl = formatDepositRequestUrl(bookingId)
+
+              const bookingForEmail = {
+                id: bookingId,
+                rentalLabel,
+                date,
+                rentalTime: rentalTime || "",
+                towLocation: towLocation || "None",
+                customerEmail: normalizedCustomerEmail || "",
+                waiverPrintedName,
+                photoIdPath: req.file ? `./uploads/${req.file.filename}` : null,
+                status: "pending_approval",
+              }
+
+              sendAdminApprovalEmail(bookingForEmail).catch((emailErr) => {
+                console.error("ADMIN APPROVAL EMAIL ERROR:", emailErr)
+              })
 
               Promise.allSettled([
                 sendEmail({
-                  to: process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER,
+                  to: ADMIN_NOTIFICATION_EMAIL,
                   subject: `New booking request #${bookingId}`,
                   text: `
 New booking request received.
@@ -843,7 +941,6 @@ ${depositUrl}
                 })
               })
 
-              // If rental is within 3 days, immediately send deposit request link
               if (normalizedCustomerEmail && isWithinNextThreeDays(date)) {
                 Promise.allSettled([
                   sendEmail({
@@ -945,7 +1042,7 @@ Date: ${booking.date || "Not provided"}
           }
 
           await sendEmail({
-            to: process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER,
+            to: ADMIN_NOTIFICATION_EMAIL,
             subject: `Waiver signed for booking #${booking.id}`,
             text: `
 Waiver signed.
@@ -1003,6 +1100,7 @@ app.post("/api/create-checkout/:id", async (req, res) => {
             currency: "usd",
             product_data: {
               name: booking.rentalLabel || "Boat Rental",
+              description: "Fuel is charged separately.",
             },
             unit_amount: totalPrice(booking),
           },
@@ -1098,7 +1196,16 @@ app.get("/api/admin/blocked-dates", async (_req, res) => {
 // ADMIN HELPERS
 // -----------------------------
 async function sendStatusEmails(booking, newStatus) {
-  const readableStatus = String(newStatus || "").replaceAll("_", " ")
+  const readableStatus = statusLabel(newStatus)
+  const payLinkText =
+    newStatus === "approved_unpaid"
+      ? `\nPay from the website: ${SITE_URL}\n`
+      : ""
+
+  const payLinkHtml =
+    newStatus === "approved_unpaid"
+      ? `<p>You can now return to the website to complete payment: <a href="${SITE_URL}">${SITE_URL}</a></p>`
+      : ""
 
   try {
     if (booking.customerEmail) {
@@ -1111,7 +1218,7 @@ Your booking status has been updated.
 Booking ID: ${booking.id}
 Rental: ${booking.rentalLabel || "Boat Rental"}
 Date: ${booking.date || "Not provided"}
-Status: ${readableStatus}
+Status: ${readableStatus}${payLinkText}
         `.trim(),
         html: `
           <h2>Booking status updated</h2>
@@ -1119,12 +1226,13 @@ Status: ${readableStatus}
           <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
           <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
           <p><strong>Status:</strong> ${escapeHtml(readableStatus)}</p>
+          ${payLinkHtml}
         `,
       })
     }
 
     await sendEmail({
-      to: process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER,
+      to: ADMIN_NOTIFICATION_EMAIL,
       subject: `Booking #${booking.id} status changed to ${readableStatus}`,
       text: `
 Booking status updated.
@@ -1148,22 +1256,62 @@ Status: ${readableStatus}
 }
 
 // -----------------------------
-// ADMIN ACTIONS
+// ADMIN ACTION CORES
+// -----------------------------
+async function approveBookingCore(id) {
+  const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+
+  if (!booking) {
+    return { notFound: true }
+  }
+
+  await runAsync(`UPDATE bookings SET status = 'approved_unpaid' WHERE id = ?`, [id])
+  const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+  await sendStatusEmails(updated, "approved_unpaid")
+
+  return { booking: updated }
+}
+
+async function denyBookingCore(id) {
+  const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+
+  if (!booking) {
+    return { notFound: true }
+  }
+
+  await runAsync(`UPDATE bookings SET status = 'denied' WHERE id = ?`, [id])
+  const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+  await sendStatusEmails(updated, "denied")
+
+  return { booking: updated }
+}
+
+async function confirmBookingCore(id) {
+  const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+
+  if (!booking) {
+    return { notFound: true }
+  }
+
+  await runAsync(`UPDATE bookings SET status = 'confirmed' WHERE id = ?`, [id])
+  const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+  await sendStatusEmails(updated, "confirmed")
+
+  return { booking: updated }
+}
+
+// -----------------------------
+// ADMIN ACTION HANDLERS
 // -----------------------------
 async function approveBookingHandler(req, res) {
   const { id } = req.params
 
   try {
-    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+    const result = await approveBookingCore(id)
 
-    if (!booking) {
+    if (result.notFound) {
       return res.status(404).json({ error: "Booking not found" })
     }
-
-    await runAsync(`UPDATE bookings SET status = 'approved_unpaid' WHERE id = ?`, [id])
-
-    const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
-    await sendStatusEmails(updated, "approved_unpaid")
 
     return res.json({ success: true, message: "Booking approved" })
   } catch (err) {
@@ -1176,16 +1324,11 @@ async function denyBookingHandler(req, res) {
   const { id } = req.params
 
   try {
-    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+    const result = await denyBookingCore(id)
 
-    if (!booking) {
+    if (result.notFound) {
       return res.status(404).json({ error: "Booking not found" })
     }
-
-    await runAsync(`UPDATE bookings SET status = 'denied' WHERE id = ?`, [id])
-
-    const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
-    await sendStatusEmails(updated, "denied")
 
     return res.json({ success: true, message: "Booking denied" })
   } catch (err) {
@@ -1198,16 +1341,11 @@ async function confirmBookingHandler(req, res) {
   const { id } = req.params
 
   try {
-    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+    const result = await confirmBookingCore(id)
 
-    if (!booking) {
+    if (result.notFound) {
       return res.status(404).json({ error: "Booking not found" })
     }
-
-    await runAsync(`UPDATE bookings SET status = 'confirmed' WHERE id = ?`, [id])
-
-    const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
-    await sendStatusEmails(updated, "confirmed")
 
     return res.json({ success: true, message: "Booking confirmed" })
   } catch (err) {
@@ -1256,7 +1394,7 @@ ${depositUrl}
     }
 
     await sendEmail({
-      to: process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER,
+      to: ADMIN_NOTIFICATION_EMAIL,
       subject: `Deposit link created for booking #${booking.id}`,
       text: `
 Deposit authorization link created.
@@ -1280,6 +1418,58 @@ Link: ${depositUrl}
   }
 }
 
+// -----------------------------
+// PROTECTED EMAIL ACTION LINKS
+// -----------------------------
+app.get("/api/admin/approve/:id", requireAdminToken, async (req, res) => {
+  try {
+    const result = await approveBookingCore(req.params.id)
+
+    if (result.notFound) {
+      return res.status(404).send("Booking not found.")
+    }
+
+    return res.send(`
+      <html>
+        <body style="font-family: Arial, sans-serif; padding: 30px;">
+          <h2>Booking #${req.params.id} approved</h2>
+          <p>The booking has been marked <strong>approved unpaid</strong>.</p>
+          <p><a href="${adminViewUrl()}">Open admin page</a></p>
+        </body>
+      </html>
+    `)
+  } catch (err) {
+    console.error("GET APPROVE ERROR:", err)
+    return res.status(500).send("Failed to approve booking.")
+  }
+})
+
+app.get("/api/admin/deny/:id", requireAdminToken, async (req, res) => {
+  try {
+    const result = await denyBookingCore(req.params.id)
+
+    if (result.notFound) {
+      return res.status(404).send("Booking not found.")
+    }
+
+    return res.send(`
+      <html>
+        <body style="font-family: Arial, sans-serif; padding: 30px;">
+          <h2>Booking #${req.params.id} denied</h2>
+          <p>The booking has been marked <strong>denied</strong>.</p>
+          <p><a href="${adminViewUrl()}">Open admin page</a></p>
+        </body>
+      </html>
+    `)
+  } catch (err) {
+    console.error("GET DENY ERROR:", err)
+    return res.status(500).send("Failed to deny booking.")
+  }
+})
+
+// -----------------------------
+// ADMIN API ROUTES
+// -----------------------------
 app.post("/api/admin/approve/:id", approveBookingHandler)
 app.post("/api/admin/bookings/:id/approve", approveBookingHandler)
 
@@ -1525,7 +1715,7 @@ app.delete("/api/admin/blocked-dates/:id", async (req, res) => {
 app.get("/api/test-email", async (_req, res) => {
   try {
     await sendEmail({
-      to: process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER,
+      to: ADMIN_NOTIFICATION_EMAIL,
       subject: "Cleared to Cruise test email",
       text: "This is a test email from your backend.",
       html: "<p>This is a test email from your backend.</p>",
@@ -1602,7 +1792,6 @@ ${depositUrl}
   }
 }
 
-// Run every hour and once shortly after start
 setInterval(processScheduledDepositRequests, 60 * 60 * 1000)
 setTimeout(processScheduledDepositRequests, 10 * 1000)
 
