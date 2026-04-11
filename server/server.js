@@ -18,6 +18,12 @@ const Stripe = require("stripe")
 const nodemailer = require("nodemailer")
 
 const app = express()
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}))
+
 const PORT = Number(process.env.PORT || 5001)
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173"
 const SITE_URL = process.env.SITE_URL || CLIENT_URL
@@ -625,7 +631,7 @@ app.post("/api/bookings/lookup", async (req, res) => {
 // CREATE BOOKING + WAIVER UPLOAD
 // -----------------------------
 app.post("/api/bookings/waiver", upload.single("photoId"), (req, res) => {
-  console.log("BOOKING REQUEST BODY:", req.body)
+  console.log("BOOKING REQUEST FILE:", req.file ? req.file.filename : "NO FILE")
   console.log("BOOKING REQUEST FILE:", req.file?.filename)
 
   const {
@@ -731,7 +737,7 @@ app.post("/api/bookings/waiver", upload.single("photoId"), (req, res) => {
               "unpaid",
               "pending_approval",
               normalizedCustomerEmail || "",
-              `/uploads/${req.file.filename}`,
+              req.file ? `./uploads/${req.file.filename}` : null,
               createdAt,
               "not_scheduled",
             ],
