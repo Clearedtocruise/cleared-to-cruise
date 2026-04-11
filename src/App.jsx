@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
+import { loadStripe } from "@stripe/stripe-js"
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:5001"
+const API = "https://cleared-to-cruise-api.onrender.com"
+
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY)
 
 const rentalOptions = [
   "Jet Ski (Single)",
