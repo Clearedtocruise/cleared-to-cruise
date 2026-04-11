@@ -75,12 +75,15 @@ function escapeHtml(value) {
 // CORS
 // -----------------------------
 const allowedOrigins = [
-  CLIENT_URL,
   SITE_URL,
+  CLIENT_URL,
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:4173",
   "http://127.0.0.1:4173",
+  "https://clearedtocruiserentals.com",
+  "https://www.clearedtocruiserentals.com",
+  "https://cleared-to-cruise.vercel.app",
 ]
 
 app.use(
