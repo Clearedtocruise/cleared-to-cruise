@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useState } from "react"
-import { loadStripe } from "@stripe/stripe-js"
 
 const API = "https://cleared-to-cruise-api.onrender.com"
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY)
-
 const rentalOptions = [
-  "Jet Ski (Single)",
-  "Jet Ski (Double)",
-  "Pontoon - 6 Hours",
-  "Pontoon - 8 Hours",
-  "Pontoon - 10 Hours",
-  "Bass Boat - Full Day",
+  { value: "Jet Ski (Single)", label: "Jet Ski (Single) — $400 + fuel", price: 400 },
+  { value: "Jet Ski (Double)", label: "Jet Ski (Double) — $750 + fuel", price: 750 },
+  { value: "Pontoon - 6 Hours", label: "Pontoon - 6 Hours — $600 + fuel", price: 600 },
+  { value: "Pontoon - 8 Hours", label: "Pontoon - 8 Hours — $750 + fuel", price: 750 },
+  { value: "Pontoon - 10 Hours", label: "Pontoon - 10 Hours — $900 + fuel", price: 900 },
+  { value: "Bass Boat - Full Day", label: "Bass Boat - Full Day — $400 + fuel", price: 400 },
 ]
 
-const towOptions = ["None", "Castaic", "Pyramid"]
+const towOptions = [
+  { value: "None", label: "None", price: 0 },
+  { value: "Castaic", label: "Castaic — $75", price: 75 },
+  { value: "Pyramid", label: "Pyramid — $150", price: 150 },
+]
 
 const timeOptions = [
   "06:00 AM",
@@ -53,6 +54,14 @@ function formatDate(value) {
 function normalizeStatusLabel(value) {
   if (!value) return "—"
   return String(value).replaceAll("_", " ")
+}
+
+function getRentalPrice(rentalValue) {
+  return rentalOptions.find((item) => item.value === rentalValue)?.price || 0
+}
+
+function getTowPrice(towValue) {
+  return towOptions.find((item) => item.value === towValue)?.price || 0
 }
 
 function statusPillStyle(status) {
@@ -591,8 +600,8 @@ function AdminPage() {
               >
                 <option>All Rentals</option>
                 {rentalOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
+                  <option key={option.value} value={option.value}>
+                    {option.value}
                   </option>
                 ))}
               </select>
@@ -785,6 +794,27 @@ export default function App() {
 
   const [successBooking, setSuccessBooking] = useState(null)
   const [successLoading, setSuccessLoading] = useState(false)
+
+  const rentalPrice = useMemo(() => getRentalPrice(rental), [rental])
+  const towPrice = useMemo(() => getTowPrice(location), [location])
+  const totalAmount = useMemo(() => rentalPrice + towPrice, [rentalPrice, towPrice])
+
+  function resetBookingForm() {
+    setBookingId(null)
+    setBookingStatus("new")
+    setWaiverStatus("not_started")
+    setAvailabilityMessage("")
+    setStatusMessage("")
+    setRental("Pontoon - 6 Hours")
+    setDate("")
+    setRentalTime("07:00 AM")
+    setLocation("None")
+    setEmail("")
+    setName("")
+    setFile(null)
+    setShowWaiver(false)
+    setWaiverAccepted(false)
+  }
 
   useEffect(() => {
     async function loadSuccessBooking() {
@@ -1105,14 +1135,31 @@ export default function App() {
             <p style={styles.successText}>Loading booking details...</p>
           ) : successBooking ? (
             <div style={styles.successDetails}>
-              <div><strong>Booking ID:</strong> {successBooking.id}</div>
-              <div><strong>Rental:</strong> {successBooking.rentalLabel}</div>
-              <div><strong>Date:</strong> {successBooking.date}</div>
-              <div><strong>Time:</strong> {successBooking.rentalTime || "Not provided"}</div>
-              <div><strong>Tow Location:</strong> {successBooking.towLocation}</div>
-              <div><strong>Email:</strong> {successBooking.customerEmail || "Not provided"}</div>
-              <div><strong>Payment Status:</strong> {normalizeStatusLabel(successBooking.paymentStatus)}</div>
-              <div><strong>Status:</strong> {normalizeStatusLabel(successBooking.status)}</div>
+              <div>
+                <strong>Booking ID:</strong> {successBooking.id}
+              </div>
+              <div>
+                <strong>Rental:</strong> {successBooking.rentalLabel}
+              </div>
+              <div>
+                <strong>Date:</strong> {successBooking.date}
+              </div>
+              <div>
+                <strong>Time:</strong> {successBooking.rentalTime || "Not provided"}
+              </div>
+              <div>
+                <strong>Tow Location:</strong> {successBooking.towLocation}
+              </div>
+              <div>
+                <strong>Email:</strong> {successBooking.customerEmail || "Not provided"}
+              </div>
+              <div>
+                <strong>Payment Status:</strong>{" "}
+                {normalizeStatusLabel(successBooking.paymentStatus)}
+              </div>
+              <div>
+                <strong>Status:</strong> {normalizeStatusLabel(successBooking.status)}
+              </div>
             </div>
           ) : (
             <p style={styles.successText}>
@@ -1138,9 +1185,7 @@ export default function App() {
       <div style={styles.successPage}>
         <div style={styles.successCard}>
           <h1 style={styles.cancelTitle}>❌ Payment Cancelled</h1>
-          <p style={styles.successText}>
-            Your checkout was cancelled. No payment was completed.
-          </p>
+          <p style={styles.successText}>Your checkout was cancelled. No payment was completed.</p>
           <button
             style={styles.primaryButton}
             onClick={() => {
@@ -1169,11 +1214,7 @@ export default function App() {
 
       <section style={styles.topGrid}>
         <div style={styles.topCardLarge}>
-          <img
-            src="/images/castaic-lake.jpg"
-            alt="Castaic Lake"
-            style={styles.largeImage}
-          />
+          <img src="/images/castaic-lake.jpg" alt="Castaic Lake" style={styles.largeImage} />
           <div style={styles.imageOverlay}>
             <h2 style={styles.overlayTitle}>Castaic Lake</h2>
             <p style={styles.overlayText}>Tow option available</p>
@@ -1189,11 +1230,7 @@ export default function App() {
         </div>
 
         <div style={styles.topCardLarge}>
-          <img
-            src="/images/pyramid-lake.jpg"
-            alt="Pyramid Lake"
-            style={styles.largeImage}
-          />
+          <img src="/images/pyramid-lake.jpg" alt="Pyramid Lake" style={styles.largeImage} />
           <div style={styles.imageOverlay}>
             <h2 style={styles.overlayTitle}>Pyramid Lake</h2>
             <p style={styles.overlayText}>Tow option available</p>
@@ -1211,16 +1248,10 @@ export default function App() {
 
       <section style={styles.heroGrid}>
         <article style={styles.heroCard}>
-          <img
-            src="/images/jetski-collage-1.png"
-            alt="Jet ski rental"
-            style={styles.heroImage}
-          />
+          <img src="/images/jetski-collage-1.png" alt="Jet ski rental" style={styles.heroImage} />
           <div style={styles.heroContent}>
             <h3 style={styles.heroTitle}>Jet Ski Rentals</h3>
-            <p style={styles.heroText}>
-              Single or double jet ski options for fun lake days.
-            </p>
+            <p style={styles.heroText}>Single or double jet ski options for fun lake days.</p>
           </div>
         </article>
 
@@ -1232,9 +1263,7 @@ export default function App() {
           />
           <div style={styles.heroContent}>
             <h3 style={styles.heroTitle}>More Jet Ski Fun</h3>
-            <p style={styles.heroText}>
-              Fast, flexible, and exciting rental options.
-            </p>
+            <p style={styles.heroText}>Fast, flexible, and exciting rental options.</p>
           </div>
         </article>
 
@@ -1246,23 +1275,15 @@ export default function App() {
           />
           <div style={styles.heroContent}>
             <h3 style={styles.heroTitle}>Pontoon Rentals</h3>
-            <p style={styles.heroText}>
-              Comfortable group cruising with multiple time options.
-            </p>
+            <p style={styles.heroText}>Comfortable group cruising with multiple time options.</p>
           </div>
         </article>
 
         <article style={styles.heroCard}>
-          <img
-            src="/images/bass-boat.webp"
-            alt="Bass boat rental"
-            style={styles.heroImage}
-          />
+          <img src="/images/bass-boat.webp" alt="Bass boat rental" style={styles.heroImage} />
           <div style={styles.heroContent}>
             <h3 style={styles.heroTitle}>Bass Boat Rentals</h3>
-            <p style={styles.heroText}>
-              Full-day fishing and performance boating.
-            </p>
+            <p style={styles.heroText}>Full-day fishing and performance boating.</p>
           </div>
         </article>
       </section>
@@ -1273,22 +1294,23 @@ export default function App() {
             <h2 style={styles.sectionTitle}>Reserve Your Rental</h2>
             <p style={styles.sectionSubtext}>{selectedRentalDescription}</p>
           </div>
-          <div style={styles.badge}>
-            {bookingId ? `Booking #${bookingId}` : "New Booking"}
+
+          <div style={styles.formHeaderActions}>
+            <div style={styles.badge}>{bookingId ? `Booking #${bookingId}` : "New Booking"}</div>
+
+            <button type="button" onClick={resetBookingForm} style={styles.secondaryButton}>
+              New Booking
+            </button>
           </div>
         </div>
 
         <div style={styles.formGrid}>
           <label style={styles.label}>
             Rental Type
-            <select
-              style={styles.input}
-              value={rental}
-              onChange={(e) => setRental(e.target.value)}
-            >
+            <select style={styles.input} value={rental} onChange={(e) => setRental(e.target.value)}>
               {rentalOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -1327,8 +1349,8 @@ export default function App() {
               onChange={(e) => setLocation(e.target.value)}
             >
               {towOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -1368,6 +1390,21 @@ export default function App() {
               {file ? `Selected: ${file.name}` : "No file selected yet"}
             </span>
           </label>
+        </div>
+
+        <div style={styles.priceSummary}>
+          <div style={styles.priceRow}>
+            <span>Rental</span>
+            <strong>${rentalPrice}</strong>
+          </div>
+          <div style={styles.priceRow}>
+            <span>Tow Fee</span>
+            <strong>${towPrice}</strong>
+          </div>
+          <div style={styles.priceRowTotal}>
+            <span>Total Amount Owed</span>
+            <strong>${totalAmount} + fuel</strong>
+          </div>
         </div>
 
         <div style={styles.buttonRow}>
@@ -1418,67 +1455,62 @@ export default function App() {
 
         {bookingId && showWaiver ? (
           <section style={styles.waiverCard}>
-            <h3 style={styles.waiverTitle}>
-              Liability Waiver and Electronic Signature Agreement
-            </h3>
+            <h3 style={styles.waiverTitle}>Liability Waiver and Electronic Signature Agreement</h3>
 
             <div style={styles.waiverBox}>
               <p>
-                I understand that participation in boating, jet ski use, towing,
-                loading, launching, docking, swimming, and other water activities
-                involves inherent risks, including but not limited to serious bodily
-                injury, permanent disability, death, collisions, drowning, falling,
-                equipment failure, property damage, and damage to other persons or
-                property.
+                I understand that participation in boating, jet ski use, towing, loading,
+                launching, docking, swimming, and other water activities involves inherent risks,
+                including but not limited to serious bodily injury, permanent disability, death,
+                collisions, drowning, falling, equipment failure, property damage, and damage to
+                other persons or property.
               </p>
 
               <p>
-                I voluntarily choose to participate in this rental activity and I
-                accept all risks associated with the use, transport, operation, and
-                possession of the rental equipment during my rental period.
+                I voluntarily choose to participate in this rental activity and I accept all risks
+                associated with the use, transport, operation, and possession of the rental
+                equipment during my rental period.
               </p>
 
               <p>
-                I agree to operate the boat, jet ski, trailer, and all rental
-                equipment in a safe and lawful manner. I accept full responsibility
-                for my own safety, the safety of my passengers, and the conduct of
-                anyone allowed by me to use or ride in the rental equipment.
+                I agree to operate the boat, jet ski, trailer, and all rental equipment in a safe
+                and lawful manner. I accept full responsibility for my own safety, the safety of my
+                passengers, and the conduct of anyone allowed by me to use or ride in the rental
+                equipment.
               </p>
 
               <p>
-                I agree to release, indemnify, and hold harmless Cleared to Cruise,
-                its owners, agents, representatives, and affiliates from claims,
-                demands, liabilities, losses, damages, expenses, or causes of action
-                arising out of or related to my rental, possession, transportation,
-                or use of the rental equipment, except where prohibited by law.
+                I agree to release, indemnify, and hold harmless Cleared to Cruise, its owners,
+                agents, representatives, and affiliates from claims, demands, liabilities, losses,
+                damages, expenses, or causes of action arising out of or related to my rental,
+                possession, transportation, or use of the rental equipment, except where prohibited
+                by law.
               </p>
 
               <p>
-                I understand and agree that I am financially responsible for any loss
-                or damage to the boat, jet ski, trailer, motor, propeller,
-                accessories, safety equipment, or any other rental equipment during
-                my rental period, regardless of whether caused by me, my passengers,
-                or any person using the equipment with my permission.
+                I understand and agree that I am financially responsible for any loss or damage to
+                the boat, jet ski, trailer, motor, propeller, accessories, safety equipment, or
+                any other rental equipment during my rental period, regardless of whether caused by
+                me, my passengers, or any person using the equipment with my permission.
               </p>
 
               <p>
-                I also agree to be responsible for injury, damage, or loss caused to
-                other persons, boats, docks, vehicles, structures, or other property
-                arising from my rental or operation of the rental equipment.
+                I also agree to be responsible for injury, damage, or loss caused to other persons,
+                boats, docks, vehicles, structures, or other property arising from my rental or
+                operation of the rental equipment.
               </p>
 
               <p>
-                I confirm that the full legal name I typed on this booking form is my
-                electronic signature for this liability waiver and rental agreement.
-                I also confirm that the photo identification uploaded with this
-                booking belongs to me and that the information I provided is true and
-                correct.
+                I confirm that the full legal name I typed on this booking form is my electronic
+                signature for this liability waiver and rental agreement. I also confirm that the
+                photo identification uploaded with this booking belongs to me and that the
+                information I provided is true and correct.
               </p>
 
               <p>
-                By checking the agreement box below and signing electronically, I
-                acknowledge that I have read this waiver carefully, understand its
-                contents, and agree to be legally bound by it.
+                By checking the agreement box below and signing electronically, I acknowledge that
+                I have read this waiver carefully, understand its contents, and agree to be legally
+                bound by it.
               </p>
             </div>
 
@@ -1496,9 +1528,7 @@ export default function App() {
             <button
               type="button"
               style={
-                !waiverAccepted || !name.trim()
-                  ? styles.buttonDisabled
-                  : styles.secondaryButton
+                !waiverAccepted || !name.trim() ? styles.buttonDisabled : styles.secondaryButton
               }
               onClick={signWaiver}
               disabled={!waiverAccepted || !name.trim()}
@@ -1691,6 +1721,12 @@ const styles = {
     flexWrap: "wrap",
     marginBottom: "18px",
   },
+  formHeaderActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    flexWrap: "wrap",
+  },
   sectionTitle: {
     margin: 0,
     fontSize: "28px",
@@ -1757,6 +1793,32 @@ const styles = {
   fileName: {
     fontSize: "13px",
     color: "#627382",
+  },
+  priceSummary: {
+    marginTop: "18px",
+    background: "#f7fafc",
+    border: "1px solid #e1e8ef",
+    borderRadius: "16px",
+    padding: "16px",
+    display: "grid",
+    gap: "10px",
+  },
+  priceRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "12px",
+    color: "#203445",
+    fontSize: "15px",
+  },
+  priceRowTotal: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "12px",
+    color: "#0f2233",
+    fontSize: "18px",
+    fontWeight: 800,
+    paddingTop: "10px",
+    borderTop: "1px solid #d9e5ef",
   },
   buttonRow: {
     display: "flex",
@@ -1959,7 +2021,6 @@ const styles = {
     color: "#102030",
     fontSize: "14px",
   },
-
   adminPage: {
     minHeight: "100vh",
     background: "#eef3f7",
