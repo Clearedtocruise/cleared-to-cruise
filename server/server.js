@@ -19,9 +19,13 @@ const nodemailer = require("nodemailer")
 
 const app = express()
 app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  origin: [
+    "http://localhost:5173",
+    "https://clearedtocruiserentals.com",
+    "https://www.clearedtocruiserentals.com"
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type"]
 }))
 
 const PORT = Number(process.env.PORT || 5001)
