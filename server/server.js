@@ -1,1905 +1,1813 @@
-require("dotenv").config()
+Full Backend
 
-process.on("uncaughtException", (err) => {
-  console.error("UNCAUGHT EXCEPTION:", err)
-})
 
-process.on("unhandledRejection", (err) => {
-  console.error("UNHANDLED REJECTION:", err)
-})
+import { useEffect, useMemo, useState } from "react"
+import { BrowserRouter, Routes, Route, useParams } from "react-router-dom"
 
-const express = require("express")
-const cors = require("cors")
-const sqlite3 = require("sqlite3").verbose()
-const multer = require("multer")
-const path = require("path")
-const fs = require("fs")
-const Stripe = require("stripe")
-const nodemailer = require("nodemailer")
+const API = "https://cleared-to-cruise-api.onrender.com"
 
-const app = express()
-
-const PORT = Number(process.env.PORT || 5001)
-const CLIENT_URL = (process.env.CLIENT_URL || "http://localhost:5173").replace(/\/$/, "")
-const SITE_URL = (process.env.SITE_URL || CLIENT_URL).replace(/\/$/, "")
-const API_URL = (process.env.API_URL || `http://localhost:${PORT}`).replace(/\/$/, "")
-const ADMIN_ACTION_TOKEN = String(process.env.ADMIN_ACTION_TOKEN || "").trim()
-const ADMIN_NOTIFICATION_EMAIL = String(
-  process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER || ""
-).trim()
-
-if (!process.env.STRIPE_SECRET_KEY) {
-  console.warn("WARNING: STRIPE_SECRET_KEY is not set.")
-}
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "")
-
-// -----------------------------
-// HELPERS
-// -----------------------------
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;")
-}
-
-function normalizeEmail(value) {
-  return String(value || "").trim().toLowerCase()
-}
-
-function statusLabel(value) {
-  return String(value || "").replaceAll("_", " ")
-}
-
-function rentalBoatType(label) {
-  const lower = String(label || "").toLowerCase()
-  if (lower.includes("pontoon")) return "Pontoon"
-  if (lower.includes("bass")) return "Bass Boat"
-  if (lower.includes("jet ski")) return "Jet Ski"
-  return "All Rentals"
-}
-
-function rentalBasePrice(label) {
-  switch (label) {
-    case "Jet Ski (Single)":
-      return 40000
-    case "Jet Ski (Double)":
-      return 75000
-    case "Pontoon - 6 Hours":
-      return 60000
-    case "Pontoon - 8 Hours":
-      return 75000
-    case "Pontoon - 10 Hours":
-      return 90000
-    case "Bass Boat - Full Day":
-      return 40000
-    default:
-      return 0
-  }
-}
-
-function towFeeForLocation(location) {
-  if (location === "Castaic") return 7500
-  if (location === "Pyramid") return 15000
-  return 0
-}
-
-function totalPrice(booking) {
-  return rentalBasePrice(booking.rentalLabel) + towFeeForLocation(booking.towLocation)
-}
-
-function formatDepositRequestUrl(bookingId) {
-  return `${SITE_URL}/deposit/${bookingId}`
-}
-
-function formatPaymentUrl(bookingId) {
-  return `${SITE_URL}/pay/${bookingId}`
-}
-
-function adminApproveUrl(bookingId) {
-  return `${API_URL}/api/admin/approve/${bookingId}?token=${encodeURIComponent(ADMIN_ACTION_TOKEN)}`
-}
-
-function adminDenyUrl(bookingId) {
-  return `${API_URL}/api/admin/deny/${bookingId}?token=${encodeURIComponent(ADMIN_ACTION_TOKEN)}`
-}
-
-function adminViewUrl() {
-  return `${SITE_URL}/admin`
-}
-
-function daysUntilBooking(dateValue) {
-  if (!dateValue) return null
-
-  const now = new Date()
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-
-  const [year, month, day] = String(dateValue).split("-").map(Number)
-  if (!year || !month || !day) return null
-
-  const bookingDate = new Date(Date.UTC(year, month - 1, day))
-  const diffMs = bookingDate.getTime() - today.getTime()
-  return Math.floor(diffMs / (1000 * 60 * 60 * 24))
-}
-
-function isWithinThreeDaysOrLess(dateValue) {
-  const days = daysUntilBooking(dateValue)
-  return days !== null && days <= 3
-}
-
-function isExactlyThreeDaysAway(dateValue) {
-  const days = daysUntilBooking(dateValue)
-  return days === 3
-}
-
-function requireAdminToken(req, res, next) {
-  if (!ADMIN_ACTION_TOKEN) {
-    return res.status(500).send("ADMIN_ACTION_TOKEN is not configured on the server.")
-  }
-
-  const token = String(req.query.token || req.headers["x-admin-token"] || "").trim()
-
-  if (!token || token !== ADMIN_ACTION_TOKEN) {
-    return res.status(403).send("Forbidden")
-  }
-
-  next()
-}
-
-// -----------------------------
-// EMAIL
-// -----------------------------
-const mailer =
-  process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD
-    ? nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user: process.env.GMAIL_USER,
-          pass: process.env.GMAIL_APP_PASSWORD,
-        },
-      })
-    : null
-
-async function sendEmail({ to, subject, text, html }) {
-  if (!to) {
-    console.warn("Email skipped: missing recipient.")
-    return
-  }
-
-  if (!mailer) {
-    console.warn("Email skipped: mailer not configured.")
-    return
-  }
-
-  return mailer.sendMail({
-    from: `"Cleared to Cruise" <${process.env.GMAIL_USER}>`,
-    to,
-    subject,
-    text,
-    html,
-  })
-}
-
-async function sendAdminApprovalEmail(booking) {
-  const approveUrl = adminApproveUrl(booking.id)
-  const denyUrl = adminDenyUrl(booking.id)
-  const photoUrl = booking.photoIdPath
-    ? `${API_URL}/${String(booking.photoIdPath).replace(/^\.?\//, "")}`
-    : ""
-
-  return sendEmail({
-    to: ADMIN_NOTIFICATION_EMAIL,
-    subject: `Approve or deny booking #${booking.id}`,
-    text: `
-A new booking requires review.
-
-Booking ID: ${booking.id}
-Name: ${booking.waiverPrintedName || "No name"}
-Email: ${booking.customerEmail || "No email"}
-Rental: ${booking.rentalLabel || "Boat Rental"}
-Date: ${booking.date || "Not provided"}
-Time: ${booking.rentalTime || "Not provided"}
-Tow Location: ${booking.towLocation || "None"}
-Status: ${statusLabel(booking.status || "pending_approval")}
-
-Approve:
-${approveUrl}
-
-Deny:
-${denyUrl}
-
-Admin page:
-${adminViewUrl()}
-
-Photo ID:
-${photoUrl || "Not available"}
-    `.trim(),
-    html: `
-      <h2>New booking requires review</h2>
-      <p><strong>Booking ID:</strong> ${booking.id}</p>
-      <p><strong>Name:</strong> ${escapeHtml(booking.waiverPrintedName || "No name")}</p>
-      <p><strong>Email:</strong> ${escapeHtml(booking.customerEmail || "No email")}</p>
-      <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
-      <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
-      <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
-      <p><strong>Tow Location:</strong> ${escapeHtml(booking.towLocation || "None")}</p>
-      <p><strong>Status:</strong> ${escapeHtml(statusLabel(booking.status || "pending_approval"))}</p>
-      ${
-        photoUrl
-          ? `<p><strong>Photo ID:</strong> <a href="${photoUrl}" target="_blank" rel="noopener noreferrer">View uploaded ID</a></p>`
-          : ""
-      }
-      <div style="margin-top:24px;">
-        <a href="${approveUrl}" style="display:inline-block;padding:12px 18px;background:#157347;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;margin-right:10px;">Approve Booking</a>
-        <a href="${denyUrl}" style="display:inline-block;padding:12px 18px;background:#b42318;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">Deny Booking</a>
-      </div>
-      <p style="margin-top:18px;">
-        <a href="${adminViewUrl()}" target="_blank" rel="noopener noreferrer">Open admin page</a>
-      </p>
-    `,
-  })
-}
-
-// -----------------------------
-// CORS
-// -----------------------------
-const allowedOrigins = [
-  CLIENT_URL,
-  SITE_URL,
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "http://localhost:4173",
-  "http://127.0.0.1:4173",
-  "https://clearedtocruiserentals.com",
-  "https://www.clearedtocruiserentals.com",
-  "https://cleared-to-cruise.vercel.app",
+const rentalOptions = [
+  { value: "Jet Ski (Single)", label: "Jet Ski (Single) — $400 + fuel", price: 400 },
+  { value: "Jet Ski (Double)", label: "Jet Ski (Double) — $750 + fuel", price: 750 },
+  { value: "Pontoon - 6 Hours", label: "Pontoon - 6 Hours — $600 + fuel", price: 600 },
+  { value: "Pontoon - 8 Hours", label: "Pontoon - 8 Hours — $750 + fuel", price: 750 },
+  { value: "Pontoon - 10 Hours", label: "Pontoon - 10 Hours — $900 + fuel", price: 900 },
+  { value: "Bass Boat - Full Day", label: "Bass Boat - Full Day — $400 + fuel", price: 400 },
 ]
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true)
-      }
-      return callback(new Error(`CORS not allowed for origin: ${origin}`))
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-admin-token"],
-    credentials: true,
-  })
-)
+const towOptions = [
+  { value: "None", label: "None", price: 0 },
+  { value: "Castaic", label: "Castaic — $75", price: 75 },
+  { value: "Pyramid", label: "Pyramid — $150", price: 150 },
+]
 
-// -----------------------------
-// STRIPE WEBHOOK FIRST
-// -----------------------------
-app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
-  const signature = req.headers["stripe-signature"]
+const timeOptions = [
+  "06:00 AM",
+  "06:30 AM",
+  "07:00 AM",
+  "07:30 AM",
+  "08:00 AM",
+  "08:30 AM",
+  "09:00 AM",
+  "09:30 AM",
+  "10:00 AM",
+  "10:30 AM",
+  "11:00 AM",
+  "11:30 AM",
+  "12:00 PM",
+  "12:30 PM",
+  "01:00 PM",
+  "01:30 PM",
+  "02:00 PM",
+  "02:30 PM",
+  "03:00 PM",
+  "03:30 PM",
+  "04:00 PM",
+  "04:30 PM",
+  "05:00 PM",
+]
 
-  let event
-  try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET
-    )
-  } catch (err) {
-    console.error("WEBHOOK SIGNATURE ERROR:", err.message)
-    return res.status(400).send(`Webhook Error: ${err.message}`)
-  }
+const CASTAIC_INFO_URL = "https://parks.lacounty.gov/castaic-lake-state-recreation-area/"
+const PYRAMID_INFO_URL = "https://water.ca.gov/What-We-Do/Recreation/Pyramid-Lake-Recreation"
 
-  try {
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object
-      const bookingId = Number(session.metadata?.bookingId || 0)
-
-      if (!bookingId) {
-        return res.json({ received: true })
-      }
-
-      if (session.mode === "payment") {
-        db.run(
-          `
-          UPDATE bookings
-          SET paymentStatus = 'paid',
-              status = CASE
-                WHEN status IN ('approved_unpaid', 'pending_payment') THEN 'confirmed'
-                ELSE status
-              END,
-              stripeSessionId = ?,
-              stripePaymentIntentId = ?
-          WHERE id = ?
-          `,
-          [session.id || null, session.payment_intent || null, bookingId],
-          async function (err) {
-            if (err) {
-              console.error("WEBHOOK PAYMENT UPDATE ERROR:", err)
-              return
-            }
-
-            db.get(`SELECT * FROM bookings WHERE id = ?`, [bookingId], async (_lookupErr, booking) => {
-              if (!booking) return
-
-              try {
-                if (booking.customerEmail) {
-                  await sendEmail({
-                    to: booking.customerEmail,
-                    subject: `Payment received for booking #${booking.id}`,
-                    text: `
-Your payment has been received.
-
-Booking ID: ${booking.id}
-Rental: ${booking.rentalLabel || "Boat Rental"}
-Date: ${booking.date || "Not provided"}
-Time: ${booking.rentalTime || "Not provided"}
-Status: ${booking.status || "confirmed"}
-                    `.trim(),
-                    html: `
-                      <h2>Payment received</h2>
-                      <p><strong>Booking ID:</strong> ${booking.id}</p>
-                      <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
-                      <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
-                      <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
-                      <p><strong>Status:</strong> ${escapeHtml(booking.status || "confirmed")}</p>
-                    `,
-                  })
-                }
-
-                await sendEmail({
-                  to: ADMIN_NOTIFICATION_EMAIL,
-                  subject: `Rental payment received for booking #${booking.id}`,
-                  text: `
-Rental payment received.
-
-Booking ID: ${booking.id}
-Name: ${booking.waiverPrintedName || "No name"}
-Email: ${booking.customerEmail || "No email"}
-Rental: ${booking.rentalLabel || "Boat Rental"}
-Date: ${booking.date || "Not provided"}
-Time: ${booking.rentalTime || "Not provided"}
-                  `.trim(),
-                  html: `
-                    <h2>Rental payment received</h2>
-                    <p><strong>Booking ID:</strong> ${booking.id}</p>
-                    <p><strong>Name:</strong> ${escapeHtml(booking.waiverPrintedName || "No name")}</p>
-                    <p><strong>Email:</strong> ${escapeHtml(booking.customerEmail || "No email")}</p>
-                    <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
-                    <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
-                    <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
-                  `,
-                })
-              } catch (emailErr) {
-                console.error("WEBHOOK PAYMENT EMAIL ERROR:", emailErr)
-              }
-            })
-          }
-        )
-      }
-
-      if (session.mode === "setup") {
-        let paymentMethodId = null
-
-        if (session.setup_intent) {
-          const setupIntent = await stripe.setupIntents.retrieve(session.setup_intent)
-          paymentMethodId = setupIntent.payment_method || null
-        }
-
-        db.run(
-          `
-          UPDATE bookings
-          SET stripeCustomerId = ?,
-              stripePaymentMethodId = ?,
-              depositSetupSessionId = ?,
-              depositSetupIntentId = ?,
-              depositStatus = 'card_on_file'
-          WHERE id = ?
-          `,
-          [
-            session.customer || null,
-            paymentMethodId,
-            session.id,
-            session.setup_intent || null,
-            bookingId,
-          ],
-          async function (err) {
-            if (err) {
-              console.error("WEBHOOK SETUP UPDATE ERROR:", err)
-              return
-            }
-
-            db.get(`SELECT * FROM bookings WHERE id = ?`, [bookingId], async (_e, booking) => {
-              if (!booking) return
-              try {
-                if (booking.customerEmail) {
-                  await sendEmail({
-                    to: booking.customerEmail,
-                    subject: `Security deposit card saved for booking #${booking.id}`,
-                    text: `
-Your security deposit card authorization has been saved.
-
-Booking ID: ${booking.id}
-Rental: ${booking.rentalLabel || "Boat Rental"}
-Date: ${booking.date || "Not provided"}
-                    `.trim(),
-                    html: `
-                      <h2>Security deposit card saved</h2>
-                      <p><strong>Booking ID:</strong> ${booking.id}</p>
-                      <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
-                      <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
-                    `,
-                  })
-                }
-              } catch (emailErr) {
-                console.error("WEBHOOK DEPOSIT EMAIL ERROR:", emailErr)
-              }
-            })
-          }
-        )
-      }
-    }
-
-    res.json({ received: true })
-  } catch (err) {
-    console.error("WEBHOOK PROCESSING ERROR:", err)
-    res.status(500).send("Webhook processing failed")
-  }
-})
-
-// normal JSON after webhook
-app.use(express.json())
-
-// -----------------------------
-// FILES / UPLOADS
-// -----------------------------
-const uploadsDir = path.join(__dirname, "uploads")
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true })
-}
-
-app.use("/uploads", express.static(uploadsDir))
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (_req, file, cb) => {
-    const safeName = file.originalname.replace(/\s+/g, "-")
-    cb(null, `${Date.now()}-${safeName}`)
+const heroRentalGroups = [
+  {
+    key: "jetski-single",
+    title: "Jet Ski Rentals",
+    text: "Single jet ski rental option.",
+    image: "/images/jetski-collage-1.png",
+    alt: "Jet ski rental",
+    options: ["Jet Ski (Single)"],
   },
-})
+  {
+    key: "jetski-double",
+    title: "More Jet Ski Fun",
+    text: "Double jet ski rental option.",
+    image: "/images/jetski-collage-2.png",
+    alt: "More jet ski action",
+    options: ["Jet Ski (Double)"],
+  },
+  {
+    key: "pontoon",
+    title: "Pontoon Rentals",
+    text: "Comfortable group cruising with multiple time options.",
+    image: "/images/suntracker-pontoon.png",
+    alt: "Pontoon rental",
+    options: ["Pontoon - 6 Hours", "Pontoon - 8 Hours", "Pontoon - 10 Hours"],
+  },
+  {
+    key: "bass-boat",
+    title: "Bass Boat Rentals",
+    text: "Full-day fishing and performance boating.",
+    image: "/images/bass-boat.webp",
+    alt: "Bass boat rental",
+    options: ["Bass Boat - Full Day"],
+  },
+]
 
-const upload = multer({ storage })
+function formatDate(value) {
+  if (!value) return "—"
+  return value
+}
 
-// -----------------------------
-// DATABASE
-// -----------------------------
-const dbPath = path.join(__dirname, "database.db")
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error("DATABASE ERROR:", err)
-  } else {
-    console.log("Connected to SQLite database.")
+function normalizeStatusLabel(value) {
+  if (!value) return "—"
+  return String(value).replaceAll("_", " ")
+}
+
+function getRentalPrice(rentalValue) {
+  return rentalOptions.find((item) => item.value === rentalValue)?.price || 0
+}
+
+function getTowPrice(towValue) {
+  return towOptions.find((item) => item.value === towValue)?.price || 0
+}
+
+function getRentalLabel(rentalValue) {
+  return rentalOptions.find((item) => item.value === rentalValue)?.label || rentalValue
+}
+
+function statusPillStyle(status) {
+  const base = {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "6px 10px",
+    borderRadius: "999px",
+    fontSize: "12px",
+    fontWeight: 800,
+    textTransform: "capitalize",
+    border: "1px solid transparent",
+    whiteSpace: "nowrap",
   }
-})
 
-function runAsync(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) return reject(err)
-      resolve(this)
-    })
-  })
+  switch (status) {
+    case "confirmed":
+      return {
+        ...base,
+        background: "#ecfdf3",
+        color: "#157347",
+        borderColor: "#b7e4c7",
+      }
+    case "approved_unpaid":
+      return {
+        ...base,
+        background: "#eff6ff",
+        color: "#1d4ed8",
+        borderColor: "#bfdbfe",
+      }
+    case "pending_approval":
+      return {
+        ...base,
+        background: "#fff7ed",
+        color: "#c2410c",
+        borderColor: "#fed7aa",
+      }
+    case "denied":
+      return {
+        ...base,
+        background: "#fef2f2",
+        color: "#b42318",
+        borderColor: "#fecaca",
+      }
+    case "paid":
+      return {
+        ...base,
+        background: "#ecfdf3",
+        color: "#157347",
+        borderColor: "#b7e4c7",
+      }
+    case "signed":
+      return {
+        ...base,
+        background: "#f0f9ff",
+        color: "#0369a1",
+        borderColor: "#bae6fd",
+      }
+    default:
+      return {
+        ...base,
+        background: "#f3f4f6",
+        color: "#374151",
+        borderColor: "#e5e7eb",
+      }
+  }
 }
 
-function getAsync(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) return reject(err)
-      resolve(row)
-    })
-  })
-}
+function BookingLookupCard() {
+  const [lookupBookingId, setLookupBookingId] = useState("")
+  const [lookupEmail, setLookupEmail] = useState("")
+  const [lookupLoading, setLookupLoading] = useState(false)
+  const [lookupError, setLookupError] = useState("")
+  const [lookupMode, setLookupMode] = useState("")
+  const [lookupBooking, setLookupBooking] = useState(null)
+  const [lookupBookings, setLookupBookings] = useState([])
 
-function allAsync(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) return reject(err)
-      resolve(rows)
-    })
-  })
-}
+  async function lookupBookingStatus() {
+    setLookupError("")
+    setLookupMode("")
+    setLookupBooking(null)
+    setLookupBookings([])
 
-// -----------------------------
-// SCHEMA + MIGRATIONS
-// -----------------------------
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS bookings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      userId TEXT,
-      rentalLabel TEXT,
-      boatType TEXT,
-      date TEXT,
-      rentalTime TEXT,
-      towLocation TEXT,
-      towFee INTEGER DEFAULT 0,
-      waiverPrintedName TEXT,
-      waiverAccepted INTEGER DEFAULT 0,
-      waiverAcceptedAt TEXT,
-      waiverStatus TEXT DEFAULT 'not_started',
-      paymentStatus TEXT DEFAULT 'unpaid',
-      status TEXT DEFAULT 'pending_approval',
-      customerEmail TEXT,
-      photoIdPath TEXT,
-      stripeSessionId TEXT,
-      stripePaymentIntentId TEXT,
-      stripeCustomerId TEXT,
-      stripePaymentMethodId TEXT,
-      depositSetupSessionId TEXT,
-      depositSetupIntentId TEXT,
-      depositPaymentIntentId TEXT,
-      depositRequestedAt TEXT,
-      depositPlacedAt TEXT,
-      depositReleasedAt TEXT,
-      depositStatus TEXT DEFAULT 'not_scheduled',
-      depositLinkSentAt TEXT,
-      createdAt TEXT NOT NULL
-    )
-  `)
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS blocked_dates (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      boatType TEXT NOT NULL,
-      date TEXT NOT NULL,
-      reason TEXT,
-      createdAt TEXT NOT NULL,
-      rentalLabel TEXT
-    )
-  `)
-
-  const bookingColumns = [
-    ["userId", "TEXT"],
-    ["rentalLabel", "TEXT"],
-    ["boatType", "TEXT"],
-    ["date", "TEXT"],
-    ["rentalTime", "TEXT"],
-    ["towLocation", "TEXT"],
-    ["towFee", "INTEGER DEFAULT 0"],
-    ["waiverPrintedName", "TEXT"],
-    ["waiverAccepted", "INTEGER DEFAULT 0"],
-    ["waiverAcceptedAt", "TEXT"],
-    ["waiverStatus", "TEXT DEFAULT 'not_started'"],
-    ["paymentStatus", "TEXT DEFAULT 'unpaid'"],
-    ["status", "TEXT DEFAULT 'pending_approval'"],
-    ["customerEmail", "TEXT"],
-    ["photoIdPath", "TEXT"],
-    ["stripeSessionId", "TEXT"],
-    ["stripePaymentIntentId", "TEXT"],
-    ["stripeCustomerId", "TEXT"],
-    ["stripePaymentMethodId", "TEXT"],
-    ["depositSetupSessionId", "TEXT"],
-    ["depositSetupIntentId", "TEXT"],
-    ["depositPaymentIntentId", "TEXT"],
-    ["depositRequestedAt", "TEXT"],
-    ["depositPlacedAt", "TEXT"],
-    ["depositReleasedAt", "TEXT"],
-    ["depositStatus", "TEXT DEFAULT 'not_scheduled'"],
-    ["depositLinkSentAt", "TEXT"],
-    ["createdAt", "TEXT"],
-  ]
-
-  db.all(`PRAGMA table_info(bookings)`, [], (err, rows) => {
-    if (err) {
-      console.error("BOOKINGS PRAGMA ERROR:", err)
+    if (!lookupBookingId.trim() && !lookupEmail.trim()) {
+      setLookupError("Enter a booking ID, an email address, or both.")
       return
     }
 
-    const existing = new Set(rows.map((r) => r.name))
-    bookingColumns.forEach(([name, type]) => {
-      if (!existing.has(name)) {
-        db.run(`ALTER TABLE bookings ADD COLUMN ${name} ${type}`, [], (alterErr) => {
-          if (alterErr) {
-            console.error(`ALTER bookings add ${name} ERROR:`, alterErr)
-          }
-        })
-      }
-    })
-
-    db.run(
-      `UPDATE bookings SET createdAt = COALESCE(createdAt, datetime('now')) WHERE createdAt IS NULL OR createdAt = ''`,
-      [],
-      (updateErr) => {
-        if (updateErr) console.error("BOOKINGS createdAt backfill ERROR:", updateErr)
-      }
-    )
-  })
-
-  db.all(`PRAGMA table_info(blocked_dates)`, [], (err, rows) => {
-    if (err) {
-      console.error("BLOCKED DATES PRAGMA ERROR:", err)
-      return
-    }
-
-    const existing = new Set(rows.map((r) => r.name))
-    if (!existing.has("rentalLabel")) {
-      db.run(`ALTER TABLE blocked_dates ADD COLUMN rentalLabel TEXT`, [], (alterErr) => {
-        if (alterErr) console.error("ALTER blocked_dates rentalLabel ERROR:", alterErr)
-      })
-    }
-    if (!existing.has("createdAt")) {
-      db.run(`ALTER TABLE blocked_dates ADD COLUMN createdAt TEXT`, [], (alterErr) => {
-        if (alterErr) console.error("ALTER blocked_dates createdAt ERROR:", alterErr)
-      })
-    }
-  })
-
-  db.get(`SELECT seq FROM sqlite_sequence WHERE name = 'bookings'`, [], (err, row) => {
-    if (err) return
-    if (!row) {
-      db.run(`INSERT INTO sqlite_sequence(name, seq) VALUES('bookings', 999)`, [], () => {})
-    } else if ((row.seq || 0) < 999) {
-      db.run(`UPDATE sqlite_sequence SET seq = 999 WHERE name = 'bookings'`, [], () => {})
-    }
-  })
-})
-
-// -----------------------------
-// HEALTH
-// -----------------------------
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true })
-})
-
-// -----------------------------
-// AVAILABILITY
-// -----------------------------
-app.get("/api/availability", async (req, res) => {
-  const { rentalLabel, date } = req.query
-
-  if (!rentalLabel || !date) {
-    return res.status(400).json({ error: "rentalLabel and date are required." })
-  }
-
-  try {
-    const boatType = rentalBoatType(rentalLabel)
-
-    const blockedRow = await getAsync(
-      `
-      SELECT COUNT(*) AS count
-      FROM blocked_dates
-      WHERE date = ?
-        AND (
-          rentalLabel = ?
-          OR rentalLabel = 'All Rentals'
-          OR rentalLabel IS NULL
-          OR boatType = ?
-          OR boatType = 'All Rentals'
-        )
-      `,
-      [date, rentalLabel, boatType]
-    )
-
-    if ((blockedRow?.count || 0) > 0) {
-      return res.json({ available: false })
-    }
-
-    if (boatType === "Jet Ski") {
-      const rows = await allAsync(
-        `
-        SELECT rentalLabel
-        FROM bookings
-        WHERE date = ?
-          AND boatType = 'Jet Ski'
-          AND status IN ('pending_approval', 'approved_unpaid', 'pending_payment', 'confirmed')
-        `,
-        [date]
-      )
-
-      const singleCount = rows.filter((r) => r.rentalLabel === "Jet Ski (Single)").length
-      const hasDouble = rows.some((r) => r.rentalLabel === "Jet Ski (Double)")
-
-      let available = true
-
-      if (rentalLabel === "Jet Ski (Double)") {
-        available = !hasDouble && singleCount === 0
-      } else if (rentalLabel === "Jet Ski (Single)") {
-        available = !hasDouble && singleCount < 2
-      }
-
-      return res.json({ available })
-    }
-
-    const bookingRow = await getAsync(
-      `
-      SELECT COUNT(*) AS count
-      FROM bookings
-      WHERE date = ?
-        AND rentalLabel = ?
-        AND status IN ('pending_approval', 'approved_unpaid', 'pending_payment', 'confirmed')
-      `,
-      [date, rentalLabel]
-    )
-
-    return res.json({ available: (bookingRow?.count || 0) === 0 })
-  } catch (err) {
-    console.error("AVAILABILITY ERROR:", err)
-    return res.status(500).json({ error: "Could not check availability." })
-  }
-})
-
-// -----------------------------
-// BOOKING LOOKUP
-// -----------------------------
-app.post("/api/bookings/lookup", async (req, res) => {
-  const bookingId = String(req.body.bookingId || "").trim()
-  const email = normalizeEmail(req.body.email)
-
-  if (!bookingId && !email) {
-    return res.status(400).json({ error: "Booking ID or email is required." })
-  }
-
-  try {
-    if (bookingId) {
-      const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [bookingId])
-
-      if (!booking) {
-        return res.status(404).json({ error: "Booking not found." })
-      }
-
-      if (email && normalizeEmail(booking.customerEmail) !== email) {
-        return res.status(404).json({ error: "Booking not found." })
-      }
-
-      return res.json({ mode: "single", booking })
-    }
-
-    const bookings = await allAsync(
-      `SELECT * FROM bookings WHERE LOWER(COALESCE(customerEmail, '')) = ? ORDER BY id DESC`,
-      [email]
-    )
-
-    if (!bookings.length) {
-      return res.status(404).json({ error: "No bookings found for that email." })
-    }
-
-    return res.json({ mode: "list", bookings })
-  } catch (err) {
-    console.error("BOOKING LOOKUP ERROR:", err)
-    return res.status(500).json({ error: "Could not lookup booking." })
-  }
-})
-
-// -----------------------------
-// CREATE BOOKING + WAIVER UPLOAD
-// -----------------------------
-app.post("/api/bookings/waiver", upload.single("photoId"), (req, res) => {
-  console.log("BOOKING REQUEST FILE:", req.file ? req.file.filename : "NO FILE")
-
-  const {
-    rentalLabel,
-    date,
-    rentalTime,
-    towLocation,
-    waiverPrintedName,
-    waiverAccepted,
-    customerEmail,
-  } = req.body
-
-  if (!rentalLabel || !date || !waiverPrintedName) {
-    return res.status(400).json({ error: "Missing required booking fields." })
-  }
-
-  if (!req.file) {
-    return res.status(400).json({ error: "Photo ID is required." })
-  }
-
-  const boatType = rentalBoatType(rentalLabel)
-  const towFee = towFeeForLocation(towLocation)
-  const accepted = waiverAccepted === "true" || waiverAccepted === true ? 1 : 0
-  const createdAt = new Date().toISOString()
-  const normalizedCustomerEmail = normalizeEmail(customerEmail)
-
-  function insertBooking() {
-    db.run(
-      `
-      INSERT INTO bookings (
-        userId,
-        rentalLabel,
-        boatType,
-        date,
-        rentalTime,
-        towLocation,
-        towFee,
-        waiverPrintedName,
-        waiverAccepted,
-        waiverStatus,
-        paymentStatus,
-        status,
-        customerEmail,
-        photoIdPath,
-        createdAt,
-        depositStatus
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        "1",
-        rentalLabel,
-        boatType,
-        date,
-        rentalTime || "",
-        towLocation || "None",
-        towFee,
-        waiverPrintedName,
-        accepted,
-        accepted ? "signed" : "not_started",
-        "unpaid",
-        "pending_approval",
-        normalizedCustomerEmail || "",
-        req.file ? `./uploads/${req.file.filename}` : null,
-        createdAt,
-        "not_scheduled",
-      ],
-      async function (err) {
-        if (err) {
-          console.error("CREATE BOOKING ERROR:", err)
-          return res.status(500).json({ error: "Could not create booking." })
-        }
-
-        const bookingId = this.lastID
-        const depositUrl = formatDepositRequestUrl(bookingId)
-
-        const bookingForEmail = {
-          id: bookingId,
-          rentalLabel,
-          date,
-          rentalTime: rentalTime || "",
-          towLocation: towLocation || "None",
-          customerEmail: normalizedCustomerEmail || "",
-          waiverPrintedName,
-          photoIdPath: req.file ? `./uploads/${req.file.filename}` : null,
-          status: "pending_approval",
-        }
-
-        sendAdminApprovalEmail(bookingForEmail).catch((emailErr) => {
-          console.error("ADMIN APPROVAL EMAIL ERROR:", emailErr)
-        })
-
-        Promise.allSettled([
-          sendEmail({
-            to: ADMIN_NOTIFICATION_EMAIL,
-            subject: `New booking request #${bookingId}`,
-            text: `
-New booking request received.
-
-Booking ID: ${bookingId}
-Name: ${waiverPrintedName}
-Email: ${normalizedCustomerEmail || "No email provided"}
-Rental: ${rentalLabel}
-Date: ${date}
-Time: ${rentalTime || "Not provided"}
-Tow Location: ${towLocation || "None"}
-Photo ID Path: /uploads/${req.file.filename}
-            `.trim(),
-            html: `
-              <h2>New booking request received</h2>
-              <p><strong>Booking ID:</strong> ${bookingId}</p>
-              <p><strong>Name:</strong> ${escapeHtml(waiverPrintedName)}</p>
-              <p><strong>Email:</strong> ${escapeHtml(normalizedCustomerEmail || "No email provided")}</p>
-              <p><strong>Rental:</strong> ${escapeHtml(rentalLabel)}</p>
-              <p><strong>Date:</strong> ${escapeHtml(date)}</p>
-              <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
-              <p><strong>Tow Location:</strong> ${escapeHtml(towLocation || "None")}</p>
-              <p><strong>Photo ID Path:</strong> /uploads/${escapeHtml(req.file.filename)}</p>
-            `,
-          }),
-          normalizedCustomerEmail
-            ? sendEmail({
-                to: normalizedCustomerEmail,
-                subject: `Cleared to Cruise booking request #${bookingId} received`,
-                text: `
-Your booking request has been received.
-
-Booking ID: ${bookingId}
-Rental: ${rentalLabel}
-Date: ${date}
-Time: ${rentalTime || "Not provided"}
-Tow Location: ${towLocation || "None"}
-
-You can check your status later with:
-Booking ID: ${bookingId}
-Email: ${normalizedCustomerEmail}
-
-Your rental payment link will be sent after approval.
-Your deposit authorization link will be sent 3 days before your booking date, or immediately if the booking is already within 3 days.
-                `.trim(),
-                html: `
-                  <h2>Your booking request has been received</h2>
-                  <p><strong>Booking ID:</strong> ${bookingId}</p>
-                  <p><strong>Rental:</strong> ${escapeHtml(rentalLabel)}</p>
-                  <p><strong>Date:</strong> ${escapeHtml(date)}</p>
-                  <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
-                  <p><strong>Tow Location:</strong> ${escapeHtml(towLocation || "None")}</p>
-                  <p>You can check your status later using your booking ID and email.</p>
-                  <p>Your rental payment link will be sent after approval.</p>
-                  <p>Your deposit authorization link will be sent 3 days before your booking date, or immediately if the booking is already within 3 days.</p>
-                `,
-              })
-            : Promise.resolve(),
-        ]).then((results) => {
-          results.forEach((result, index) => {
-            if (result.status === "rejected") {
-              console.error(
-                index === 0 ? "ADMIN BOOKING EMAIL ERROR:" : "CUSTOMER BOOKING EMAIL ERROR:",
-                result.reason
-              )
-            }
-          })
-        })
-
-        if (normalizedCustomerEmail && isWithinThreeDaysOrLess(date)) {
-          Promise.allSettled([
-            sendEmail({
-              to: normalizedCustomerEmail,
-              subject: `Security deposit authorization requested for booking #${bookingId}`,
-              text: `
-Please authorize your $500 security deposit card for booking #${bookingId}.
-
-Rental: ${rentalLabel}
-Date: ${date}
-Time: ${rentalTime || "Not provided"}
-
-Deposit link:
-${depositUrl}
-              `.trim(),
-              html: `
-                <h2>Security deposit authorization requested</h2>
-                <p>Please authorize your $500 security deposit card for booking #${bookingId}.</p>
-                <p><strong>Rental:</strong> ${escapeHtml(rentalLabel)}</p>
-                <p><strong>Date:</strong> ${escapeHtml(date)}</p>
-                <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
-                <p><a href="${depositUrl}">Authorize Deposit</a></p>
-              `,
-            }),
-            runAsync(
-              `UPDATE bookings SET depositLinkSentAt = datetime('now'), depositRequestedAt = datetime('now'), depositStatus = 'requested' WHERE id = ?`,
-              [bookingId]
-            ),
-          ]).catch((depositErr) => {
-            console.error("IMMEDIATE DEPOSIT REQUEST ERROR:", depositErr)
-          })
-        }
-
-        return res.json({ success: true, bookingId })
-      }
-    )
-  }
-
-  db.get(
-    `
-    SELECT COUNT(*) AS count
-    FROM blocked_dates
-    WHERE date = ?
-      AND (
-        rentalLabel = ?
-        OR rentalLabel = 'All Rentals'
-        OR rentalLabel IS NULL
-        OR boatType = ?
-        OR boatType = 'All Rentals'
-      )
-    `,
-    [date, rentalLabel, boatType],
-    (blockedErr, blockedRow) => {
-      if (blockedErr) {
-        console.error("CREATE BOOKING BLOCK CHECK ERROR:", blockedErr)
-        return res.status(500).json({ error: "Could not verify blocked dates." })
-      }
-
-      if ((blockedRow?.count || 0) > 0) {
-        return res.status(409).json({ error: "That rental is blocked for the selected date." })
-      }
-
-      if (boatType === "Jet Ski") {
-        db.all(
-          `
-          SELECT rentalLabel
-          FROM bookings
-          WHERE date = ?
-            AND boatType = 'Jet Ski'
-            AND status IN ('pending_approval', 'approved_unpaid', 'pending_payment', 'confirmed')
-          `,
-          [date],
-          (existingErr, rows) => {
-            if (existingErr) {
-              console.error("CREATE BOOKING JET SKI CHECK ERROR:", existingErr)
-              return res.status(500).json({ error: "Could not verify existing bookings." })
-            }
-
-            const singleCount = rows.filter((r) => r.rentalLabel === "Jet Ski (Single)").length
-            const hasDouble = rows.some((r) => r.rentalLabel === "Jet Ski (Double)")
-
-            let available = true
-
-            if (rentalLabel === "Jet Ski (Double)") {
-              available = !hasDouble && singleCount === 0
-            } else if (rentalLabel === "Jet Ski (Single)") {
-              available = !hasDouble && singleCount < 2
-            }
-
-            if (!available) {
-              return res
-                .status(409)
-                .json({ error: "That jet ski option is no longer available for the selected date." })
-            }
-
-            insertBooking()
-          }
-        )
-      } else {
-        db.get(
-          `
-          SELECT COUNT(*) AS count
-          FROM bookings
-          WHERE date = ?
-            AND rentalLabel = ?
-            AND status IN ('pending_approval', 'approved_unpaid', 'pending_payment', 'confirmed')
-          `,
-          [date, rentalLabel],
-          (existingErr, existingRow) => {
-            if (existingErr) {
-              console.error("CREATE BOOKING DUPLICATE CHECK ERROR:", existingErr)
-              return res.status(500).json({ error: "Could not verify existing bookings." })
-            }
-
-            if ((existingRow?.count || 0) > 0) {
-              return res
-                .status(409)
-                .json({ error: "That rental is already booked or pending for the selected date." })
-            }
-
-            insertBooking()
-          }
-        )
-      }
-    }
-  )
-})
-
-// -----------------------------
-// BOOKING GET
-// -----------------------------
-app.get("/api/bookings/:id", (req, res) => {
-  db.get(`SELECT * FROM bookings WHERE id = ?`, [req.params.id], (err, row) => {
-    if (err) {
-      console.error("GET BOOKING ERROR:", err)
-      return res.status(500).json({ error: "Could not load booking." })
-    }
-
-    if (!row) {
-      return res.status(404).json({ error: "Booking not found." })
-    }
-
-    return res.json(row)
-  })
-})
-
-// -----------------------------
-// WAIVER SIGNED
-// -----------------------------
-app.post("/api/waiver/signed/:id", (req, res) => {
-  db.run(
-    `
-    UPDATE bookings
-    SET waiverStatus = 'signed',
-        waiverAccepted = 1,
-        waiverAcceptedAt = datetime('now')
-    WHERE id = ?
-    `,
-    [req.params.id],
-    function (err) {
-      if (err) {
-        console.error("WAIVER SIGN ERROR:", err)
-        return res.status(500).json({ error: "Could not update waiver." })
-      }
-
-      if (this.changes === 0) {
-        return res.status(404).json({ error: "Booking not found." })
-      }
-
-      db.get(`SELECT * FROM bookings WHERE id = ?`, [req.params.id], async (_e, booking) => {
-        if (!booking) return
-
-        try {
-          if (booking.customerEmail) {
-            await sendEmail({
-              to: booking.customerEmail,
-              subject: `Waiver signed for booking #${booking.id}`,
-              text: `
-Your waiver has been signed.
-
-Booking ID: ${booking.id}
-Rental: ${booking.rentalLabel || "Boat Rental"}
-Date: ${booking.date || "Not provided"}
-              `.trim(),
-              html: `
-                <h2>Waiver signed</h2>
-                <p><strong>Booking ID:</strong> ${booking.id}</p>
-                <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
-                <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
-              `,
-            })
-          }
-
-          await sendEmail({
-            to: ADMIN_NOTIFICATION_EMAIL,
-            subject: `Waiver signed for booking #${booking.id}`,
-            text: `
-Waiver signed.
-
-Booking ID: ${booking.id}
-Name: ${booking.waiverPrintedName || "No name"}
-Email: ${booking.customerEmail || "No email"}
-Rental: ${booking.rentalLabel || "Boat Rental"}
-Date: ${booking.date || "Not provided"}
-            `.trim(),
-            html: `
-              <h2>Waiver signed</h2>
-              <p><strong>Booking ID:</strong> ${booking.id}</p>
-              <p><strong>Name:</strong> ${escapeHtml(booking.waiverPrintedName || "No name")}</p>
-              <p><strong>Email:</strong> ${escapeHtml(booking.customerEmail || "No email")}</p>
-              <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
-              <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
-            `,
-          })
-        } catch (emailErr) {
-          console.error("WAIVER EMAIL ERROR:", emailErr)
-        }
-      })
-
-      return res.json({ success: true })
-    }
-  )
-})
-
-// -----------------------------
-// MAIN CHECKOUT
-// -----------------------------
-app.post("/api/create-checkout/:id", async (req, res) => {
-  try {
-    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
-
-    if (!booking) {
-      return res.status(404).json({ error: "Booking not found." })
-    }
-
-    if (booking.waiverStatus !== "signed") {
-      return res.status(400).json({ error: "Waiver must be signed before payment." })
-    }
-
-    if (booking.status !== "approved_unpaid") {
-      return res.status(400).json({ error: "Booking must be approved before payment." })
-    }
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      payment_method_types: ["card"],
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: booking.rentalLabel || "Boat Rental",
-              description: "Fuel is charged separately.",
-            },
-            unit_amount: totalPrice(booking),
-          },
-          quantity: 1,
+    setLookupLoading(true)
+
+    try {
+      const res = await fetch(`${API}/api/bookings/lookup`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      ],
-      customer_email: booking.customerEmail || undefined,
-      success_url: `${SITE_URL}/success?bookingId=${booking.id}`,
-      cancel_url: `${SITE_URL}/cancel`,
-      metadata: {
-        bookingId: String(booking.id),
-        type: "rental_payment",
-      },
-    })
-
-    await runAsync(
-      `UPDATE bookings SET stripeSessionId = ?, status = 'pending_payment' WHERE id = ?`,
-      [session.id, booking.id]
-    )
-
-    return res.json({ url: session.url })
-  } catch (error) {
-    console.error("CREATE CHECKOUT ERROR:", error)
-    return res.status(500).json({ error: "Could not create checkout session." })
-  }
-})
-
-// -----------------------------
-// DEPOSIT SETUP
-// -----------------------------
-app.post("/api/deposit/:id", async (req, res) => {
-  try {
-    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
-
-    if (!booking) {
-      return res.status(404).json({ error: "Booking not found." })
-    }
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "setup",
-      customer_email: booking.customerEmail || undefined,
-      success_url: `${SITE_URL}/success?bookingId=${booking.id}`,
-      cancel_url: `${SITE_URL}/cancel`,
-      metadata: {
-        bookingId: String(booking.id),
-        type: "deposit_setup",
-      },
-    })
-
-    await runAsync(
-      `
-      UPDATE bookings
-      SET depositSetupSessionId = ?,
-          depositRequestedAt = datetime('now'),
-          depositStatus = 'requested'
-      WHERE id = ?
-      `,
-      [session.id, booking.id]
-    )
-
-    return res.json({ success: true, url: session.url })
-  } catch (error) {
-    console.error("DEPOSIT LINK ERROR:", error)
-    return res.status(500).json({ error: "Could not create deposit link." })
-  }
-})
-
-// -----------------------------
-// ADMIN LOAD
-// -----------------------------
-app.get("/api/admin/bookings", async (_req, res) => {
-  try {
-    const rows = await allAsync(`SELECT * FROM bookings ORDER BY id DESC`)
-    return res.json(rows)
-  } catch (err) {
-    console.error("ADMIN BOOKINGS ERROR:", err)
-    return res.status(500).json({ error: "Could not load bookings." })
-  }
-})
-
-app.get("/api/admin/blocked-dates", async (_req, res) => {
-  try {
-    const rows = await allAsync(`SELECT * FROM blocked_dates ORDER BY date ASC, id DESC`)
-    return res.json(rows)
-  } catch (err) {
-    console.error("BLOCKED DATES LOAD ERROR:", err)
-    return res.status(500).json({ error: "Could not load blocked dates." })
-  }
-})
-
-// -----------------------------
-// ADMIN HELPERS
-// -----------------------------
-async function sendStatusEmails(booking, newStatus) {
-  const readableStatus = statusLabel(newStatus)
-  const paymentUrl = formatPaymentUrl(booking.id)
-
-  try {
-    if (booking.customerEmail) {
-      await sendEmail({
-        to: booking.customerEmail,
-        subject: `Booking #${booking.id} status updated: ${readableStatus}`,
-        text: `
-Your booking status has been updated.
-
-Booking ID: ${booking.id}
-Rental: ${booking.rentalLabel || "Boat Rental"}
-Date: ${booking.date || "Not provided"}
-Status: ${readableStatus}
-
-${
-  newStatus === "approved_unpaid"
-    ? `Your booking has been approved. Pay here:\n${paymentUrl}`
-    : ""
-}
-        `.trim(),
-        html: `
-          <h2>Booking status updated</h2>
-          <p><strong>Booking ID:</strong> ${booking.id}</p>
-          <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
-          <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
-          <p><strong>Status:</strong> ${escapeHtml(readableStatus)}</p>
-          ${
-            newStatus === "approved_unpaid"
-              ? `<p><a href="${paymentUrl}" style="display:inline-block;padding:12px 18px;background:#0f2233;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">Pay Rental Now</a></p>`
-              : ""
-          }
-        `,
+        body: JSON.stringify({
+          bookingId: lookupBookingId.trim(),
+          email: lookupEmail.trim(),
+        }),
       })
-    }
 
-    await sendEmail({
-      to: ADMIN_NOTIFICATION_EMAIL,
-      subject: `Booking #${booking.id} status changed to ${readableStatus}`,
-      text: `
-Booking status updated.
+      const data = await res.json().catch(() => ({}))
 
-Booking ID: ${booking.id}
-Name: ${booking.waiverPrintedName || "No name"}
-Email: ${booking.customerEmail || "No email"}
-Status: ${readableStatus}
-      `.trim(),
-      html: `
-        <h2>Booking status updated</h2>
-        <p><strong>Booking ID:</strong> ${booking.id}</p>
-        <p><strong>Name:</strong> ${escapeHtml(booking.waiverPrintedName || "No name")}</p>
-        <p><strong>Email:</strong> ${escapeHtml(booking.customerEmail || "No email")}</p>
-        <p><strong>Status:</strong> ${escapeHtml(readableStatus)}</p>
-      `,
-    })
-  } catch (err) {
-    console.error("STATUS EMAIL ERROR:", err)
-  }
-}
-
-async function approveBookingCore(id) {
-  const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
-
-  if (!booking) {
-    return { notFound: true }
-  }
-
-  await runAsync(`UPDATE bookings SET status = 'approved_unpaid' WHERE id = ?`, [id])
-  const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
-  await sendStatusEmails(updated, "approved_unpaid")
-
-  return { booking: updated }
-}
-
-async function denyBookingCore(id) {
-  const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
-
-  if (!booking) {
-    return { notFound: true }
-  }
-
-  await runAsync(`UPDATE bookings SET status = 'denied' WHERE id = ?`, [id])
-  const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
-  await sendStatusEmails(updated, "denied")
-
-  return { booking: updated }
-}
-
-async function confirmBookingCore(id) {
-  const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
-
-  if (!booking) {
-    return { notFound: true }
-  }
-
-  await runAsync(`UPDATE bookings SET status = 'confirmed' WHERE id = ?`, [id])
-  const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
-  await sendStatusEmails(updated, "confirmed")
-
-  return { booking: updated }
-}
-
-// -----------------------------
-// ADMIN ACTION HANDLERS
-// -----------------------------
-async function approveBookingHandler(req, res) {
-  const { id } = req.params
-
-  try {
-    const result = await approveBookingCore(id)
-
-    if (result.notFound) {
-      return res.status(404).json({ error: "Booking not found" })
-    }
-
-    return res.json({ success: true, message: "Booking approved" })
-  } catch (err) {
-    console.error("APPROVE ERROR:", err)
-    return res.status(500).json({ error: "Failed to approve booking" })
-  }
-}
-
-async function denyBookingHandler(req, res) {
-  const { id } = req.params
-
-  try {
-    const result = await denyBookingCore(id)
-
-    if (result.notFound) {
-      return res.status(404).json({ error: "Booking not found" })
-    }
-
-    return res.json({ success: true, message: "Booking denied" })
-  } catch (err) {
-    console.error("DENY ERROR:", err)
-    return res.status(500).json({ error: "Failed to deny booking" })
-  }
-}
-
-async function confirmBookingHandler(req, res) {
-  const { id } = req.params
-
-  try {
-    const result = await confirmBookingCore(id)
-
-    if (result.notFound) {
-      return res.status(404).json({ error: "Booking not found" })
-    }
-
-    return res.json({ success: true, message: "Booking confirmed" })
-  } catch (err) {
-    console.error("CONFIRM ERROR:", err)
-    return res.status(500).json({ error: "Failed to confirm booking" })
-  }
-}
-
-async function depositLinkHandler(req, res) {
-  try {
-    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
-
-    if (!booking) {
-      return res.status(404).json({ error: "Booking not found." })
-    }
-
-    const depositUrl = formatDepositRequestUrl(booking.id)
-
-    await runAsync(
-      `
-      UPDATE bookings
-      SET depositRequestedAt = datetime('now'),
-          depositLinkSentAt = datetime('now'),
-          depositStatus = 'requested'
-      WHERE id = ?
-      `,
-      [booking.id]
-    )
-
-    if (booking.customerEmail) {
-      await sendEmail({
-        to: booking.customerEmail,
-        subject: `Deposit authorization requested for booking #${booking.id}`,
-        text: `
-Please authorize your $500 security deposit card for booking #${booking.id}.
-
-Rental: ${booking.rentalLabel || "Boat Rental"}
-Date: ${booking.date || "Not provided"}
-Time: ${booking.rentalTime || "Not provided"}
-
-Deposit link:
-${depositUrl}
-        `.trim(),
-        html: `
-          <h2>Deposit authorization requested</h2>
-          <p>Please authorize your $500 security deposit card for booking #${booking.id}.</p>
-          <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
-          <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
-          <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
-          <p><a href="${depositUrl}">Authorize Deposit</a></p>
-        `,
-      })
-    }
-
-    await sendEmail({
-      to: ADMIN_NOTIFICATION_EMAIL,
-      subject: `Deposit link created for booking #${booking.id}`,
-      text: `
-Deposit authorization link created.
-
-Booking ID: ${booking.id}
-Customer Email: ${booking.customerEmail || "No email"}
-Link: ${depositUrl}
-      `.trim(),
-      html: `
-        <h2>Deposit link created</h2>
-        <p><strong>Booking ID:</strong> ${booking.id}</p>
-        <p><strong>Customer Email:</strong> ${escapeHtml(booking.customerEmail || "No email")}</p>
-        <p><a href="${depositUrl}">${depositUrl}</a></p>
-      `,
-    })
-
-    return res.json({ success: true, url: depositUrl })
-  } catch (error) {
-    console.error("ADMIN DEPOSIT LINK ERROR:", error)
-    return res.status(500).json({ error: "Could not create deposit link." })
-  }
-}
-
-// -----------------------------
-// PROTECTED EMAIL ACTION LINKS
-// -----------------------------
-app.get("/api/admin/approve/:id", requireAdminToken, async (req, res) => {
-  try {
-    const result = await approveBookingCore(req.params.id)
-
-    if (result.notFound) {
-      return res.status(404).send("Booking not found.")
-    }
-
-    return res.send(`
-      <html>
-        <body style="font-family: Arial, sans-serif; padding: 30px;">
-          <h2>Booking #${req.params.id} approved</h2>
-          <p>The booking has been marked <strong>approved unpaid</strong>.</p>
-          <p><a href="${adminViewUrl()}">Open admin page</a></p>
-        </body>
-      </html>
-    `)
-  } catch (err) {
-    console.error("GET APPROVE ERROR:", err)
-    return res.status(500).send("Failed to approve booking.")
-  }
-})
-
-app.get("/api/admin/deny/:id", requireAdminToken, async (req, res) => {
-  try {
-    const result = await denyBookingCore(req.params.id)
-
-    if (result.notFound) {
-      return res.status(404).send("Booking not found.")
-    }
-
-    return res.send(`
-      <html>
-        <body style="font-family: Arial, sans-serif; padding: 30px;">
-          <h2>Booking #${req.params.id} denied</h2>
-          <p>The booking has been marked <strong>denied</strong>.</p>
-          <p><a href="${adminViewUrl()}">Open admin page</a></p>
-        </body>
-      </html>
-    `)
-  } catch (err) {
-    console.error("GET DENY ERROR:", err)
-    return res.status(500).send("Failed to deny booking.")
-  }
-})
-
-// -----------------------------
-// ADMIN API ROUTES
-// -----------------------------
-app.post("/api/admin/approve/:id", approveBookingHandler)
-app.post("/api/admin/bookings/:id/approve", approveBookingHandler)
-
-app.post("/api/admin/deny/:id", denyBookingHandler)
-app.post("/api/admin/bookings/:id/deny", denyBookingHandler)
-
-app.post("/api/admin/confirm/:id", confirmBookingHandler)
-app.post("/api/admin/bookings/:id/confirm", confirmBookingHandler)
-
-app.post("/api/admin/deposit-link/:id", depositLinkHandler)
-app.post("/api/admin/bookings/:id/deposit-link", depositLinkHandler)
-app.post("/api/admin/bookings/:id/send-deposit-link", depositLinkHandler)
-
-// -----------------------------
-// ADMIN BOOKING UPDATE
-// -----------------------------
-app.post("/api/admin/bookings/:id", async (req, res) => {
-  const id = req.params.id
-  const {
-    date,
-    rentalTime,
-    rentalLabel,
-    towLocation,
-    customerEmail,
-    waiverPrintedName,
-    status,
-  } = req.body
-
-  try {
-    await runAsync(
-      `
-      UPDATE bookings
-      SET date = ?,
-          rentalTime = ?,
-          rentalLabel = ?,
-          boatType = ?,
-          towLocation = ?,
-          towFee = ?,
-          customerEmail = ?,
-          waiverPrintedName = ?,
-          status = ?
-      WHERE id = ?
-      `,
-      [
-        date || "",
-        rentalTime || "",
-        rentalLabel || "",
-        rentalBoatType(rentalLabel || ""),
-        towLocation || "None",
-        towFeeForLocation(towLocation || "None"),
-        normalizeEmail(customerEmail || ""),
-        waiverPrintedName || "",
-        status || "pending_approval",
-        id,
-      ]
-    )
-
-    return res.json({ success: true, message: "Booking updated" })
-  } catch (err) {
-    console.error("UPDATE BOOKING ERROR:", err)
-    return res.status(500).json({ error: "Could not update booking" })
-  }
-})
-
-// -----------------------------
-// ADMIN DEPOSIT ACTIONS
-// -----------------------------
-app.post("/api/admin/place-deposit/:id", async (req, res) => {
-  try {
-    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
-
-    if (!booking) {
-      return res.status(404).json({ error: "Booking not found." })
-    }
-
-    if (!booking.stripeCustomerId || !booking.stripePaymentMethodId) {
-      return res.status(400).json({ error: "No saved deposit card found." })
-    }
-
-    const intent = await stripe.paymentIntents.create({
-      amount: 50000,
-      currency: "usd",
-      customer: booking.stripeCustomerId,
-      payment_method: booking.stripePaymentMethodId,
-      confirm: true,
-      capture_method: "manual",
-      off_session: true,
-      metadata: {
-        bookingId: String(booking.id),
-        type: "security_deposit_hold",
-      },
-    })
-
-    await runAsync(
-      `
-      UPDATE bookings
-      SET depositPaymentIntentId = ?,
-          depositPlacedAt = datetime('now'),
-          depositStatus = 'held'
-      WHERE id = ?
-      `,
-      [intent.id, booking.id]
-    )
-
-    return res.json({ success: true, paymentIntentId: intent.id })
-  } catch (error) {
-    console.error("PLACE DEPOSIT ERROR:", error)
-    return res.status(500).json({ error: "Could not place deposit hold." })
-  }
-})
-
-app.post("/api/admin/release-deposit/:id", async (req, res) => {
-  try {
-    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
-
-    if (!booking) {
-      return res.status(404).json({ error: "Booking not found." })
-    }
-
-    if (!booking.depositPaymentIntentId) {
-      return res.status(400).json({ error: "No deposit hold found." })
-    }
-
-    await stripe.paymentIntents.cancel(booking.depositPaymentIntentId)
-
-    await runAsync(
-      `
-      UPDATE bookings
-      SET depositStatus = 'released',
-          depositReleasedAt = datetime('now')
-      WHERE id = ?
-      `,
-      [booking.id]
-    )
-
-    return res.json({ success: true, message: "Deposit released" })
-  } catch (error) {
-    console.error("RELEASE DEPOSIT ERROR:", error)
-    return res.status(500).json({ error: "Could not release deposit." })
-  }
-})
-
-app.post("/api/admin/charge-damage/:id", async (req, res) => {
-  const amount = Number(req.body.amount || 0)
-
-  if (!amount || amount <= 0) {
-    return res.status(400).json({ error: "A valid amount is required." })
-  }
-
-  try {
-    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
-
-    if (!booking) {
-      return res.status(404).json({ error: "Booking not found." })
-    }
-
-    if (!booking.stripeCustomerId || !booking.stripePaymentMethodId) {
-      return res.status(400).json({ error: "No saved payment method found." })
-    }
-
-    const intent = await stripe.paymentIntents.create({
-      amount,
-      currency: "usd",
-      customer: booking.stripeCustomerId,
-      payment_method: booking.stripePaymentMethodId,
-      off_session: true,
-      confirm: true,
-      metadata: {
-        bookingId: String(booking.id),
-        type: "damage_charge",
-      },
-    })
-
-    return res.json({ success: true, paymentIntentId: intent.id })
-  } catch (error) {
-    console.error("CHARGE DAMAGE ERROR:", error)
-    return res.status(500).json({ error: "Could not charge damage." })
-  }
-})
-
-// -----------------------------
-// BLOCKED DATES
-// -----------------------------
-app.post("/api/admin/block-date", async (req, res) => {
-  const { date, rentalType, rentalLabel, reason } = req.body
-  const selectedRental = rentalLabel || rentalType || "All Rentals"
-
-  if (!date) {
-    return res.status(400).json({ error: "Date is required" })
-  }
-
-  try {
-    const createdAt = new Date().toISOString()
-
-    const result = await runAsync(
-      `
-      INSERT INTO blocked_dates (boatType, date, reason, createdAt, rentalLabel)
-      VALUES (?, ?, ?, ?, ?)
-      `,
-      [selectedRental, date, reason || "", createdAt, selectedRental]
-    )
-
-    return res.json({ success: true, id: result.lastID })
-  } catch (err) {
-    console.error("BLOCK DATE ERROR:", err)
-    return res.status(500).json({ error: "Failed to block date" })
-  }
-})
-
-app.delete("/api/admin/block-date/:id", async (req, res) => {
-  try {
-    const result = await runAsync(`DELETE FROM blocked_dates WHERE id = ?`, [req.params.id])
-
-    if (result.changes === 0) {
-      return res.status(404).json({ error: "Blocked date not found" })
-    }
-
-    return res.json({ success: true, message: "Blocked date removed" })
-  } catch (err) {
-    console.error("DELETE BLOCK ERROR:", err)
-    return res.status(500).json({ error: "Failed to delete blocked date" })
-  }
-})
-
-app.delete("/api/admin/blocked-dates/:id", async (req, res) => {
-  try {
-    const result = await runAsync(`DELETE FROM blocked_dates WHERE id = ?`, [req.params.id])
-
-    if (result.changes === 0) {
-      return res.status(404).json({ error: "Blocked date not found" })
-    }
-
-    return res.json({ success: true, message: "Blocked date removed" })
-  } catch (err) {
-    console.error("DELETE BLOCK ERROR:", err)
-    return res.status(500).json({ error: "Failed to delete blocked date" })
-  }
-})
-
-// -----------------------------
-// TEST EMAIL
-// -----------------------------
-app.get("/api/test-email", async (_req, res) => {
-  try {
-    await sendEmail({
-      to: ADMIN_NOTIFICATION_EMAIL,
-      subject: "Cleared to Cruise test email",
-      text: "This is a test email from your backend.",
-      html: "<p>This is a test email from your backend.</p>",
-    })
-
-    return res.json({ success: true, message: "Test email sent." })
-  } catch (err) {
-    console.error("TEST EMAIL ERROR:", err)
-    return res.status(500).json({ error: err.message || "Could not send test email." })
-  }
-})
-
-// -----------------------------
-// SCHEDULED DEPOSIT REQUESTS
-// -----------------------------
-async function processScheduledDepositRequests() {
-  try {
-    const rows = await allAsync(
-      `
-      SELECT *
-      FROM bookings
-      WHERE customerEmail IS NOT NULL
-        AND customerEmail != ''
-        AND status IN ('approved_unpaid', 'confirmed', 'pending_payment')
-        AND (
-          depositLinkSentAt IS NULL
-          OR depositLinkSentAt = ''
-        )
-      `
-    )
-
-    for (const booking of rows) {
-      if (!isExactlyThreeDaysAway(booking.date)) {
-        continue
+      if (!res.ok) {
+        setLookupError(data.error || "Could not find booking.")
+        return
       }
 
-      const depositUrl = formatDepositRequestUrl(booking.id)
+      if (data.mode === "single" && data.booking) {
+        setLookupMode("single")
+        setLookupBooking(data.booking)
+        return
+      }
+
+      if (data.mode === "list" && Array.isArray(data.bookings)) {
+        setLookupMode("list")
+        setLookupBookings(data.bookings)
+        return
+      }
+
+      setLookupError("No booking information was returned.")
+    } catch (error) {
+      console.error(error)
+      setLookupError("Server error while checking booking status.")
+    } finally {
+      setLookupLoading(false)
+    }
+  }
+
+  return (
+    <section style={styles.mainCard}>
+      <div style={styles.formHeaderRow}>
+        <div>
+          <h2 style={styles.sectionTitle}>Check Existing Booking</h2>
+          <p style={styles.sectionSubtext}>
+            Customers can check status using booking ID, email, or both.
+          </p>
+        </div>
+      </div>
+
+      <div style={styles.formGrid}>
+        <label style={styles.label}>
+          Booking ID
+          <input
+            style={styles.input}
+            type="text"
+            placeholder="Example: 1001"
+            value={lookupBookingId}
+            onChange={(e) => setLookupBookingId(e.target.value)}
+          />
+        </label>
+
+        <label style={styles.label}>
+          Email Address
+          <input
+            style={styles.input}
+            type="email"
+            placeholder="customer@email.com"
+            value={lookupEmail}
+            onChange={(e) => setLookupEmail(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <div style={styles.buttonRow}>
+        <button
+          type="button"
+          style={lookupLoading ? styles.buttonDisabled : styles.primaryButton}
+          disabled={lookupLoading}
+          onClick={lookupBookingStatus}
+        >
+          {lookupLoading ? "Checking..." : "Check Booking Status"}
+        </button>
+      </div>
+
+      {lookupError ? <div style={styles.errorBox}>{lookupError}</div> : null}
+
+      {lookupMode === "single" && lookupBooking ? (
+        <div style={styles.lookupCard}>
+          <div style={styles.lookupRow}>
+            <strong>Booking ID:</strong> {lookupBooking.id}
+          </div>
+          <div style={styles.lookupRow}>
+            <strong>Rental:</strong> {lookupBooking.rentalLabel || "—"}
+          </div>
+          <div style={styles.lookupRow}>
+            <strong>Date:</strong> {formatDate(lookupBooking.date)}
+          </div>
+          <div style={styles.lookupRow}>
+            <strong>Time:</strong> {lookupBooking.rentalTime || "—"}
+          </div>
+          <div style={styles.lookupRow}>
+            <strong>Tow Location:</strong> {lookupBooking.towLocation || "None"}
+          </div>
+          <div style={styles.lookupRow}>
+            <strong>Waiver:</strong>{" "}
+            <span style={statusPillStyle(lookupBooking.waiverStatus || "not_started")}>
+              {normalizeStatusLabel(lookupBooking.waiverStatus || "not_started")}
+            </span>
+          </div>
+          <div style={styles.lookupRow}>
+            <strong>Payment:</strong>{" "}
+            <span style={statusPillStyle(lookupBooking.paymentStatus || "unpaid")}>
+              {normalizeStatusLabel(lookupBooking.paymentStatus || "unpaid")}
+            </span>
+          </div>
+          <div style={styles.lookupRow}>
+            <strong>Status:</strong>{" "}
+            <span style={statusPillStyle(lookupBooking.status || "new")}>
+              {normalizeStatusLabel(lookupBooking.status || "new")}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {lookupMode === "list" && lookupBookings.length > 0 ? (
+        <div style={styles.lookupList}>
+          {lookupBookings.map((booking) => (
+            <div key={booking.id} style={styles.lookupCard}>
+              <div style={styles.lookupRow}>
+                <strong>Booking ID:</strong> {booking.id}
+              </div>
+              <div style={styles.lookupRow}>
+                <strong>Rental:</strong> {booking.rentalLabel || "—"}
+              </div>
+              <div style={styles.lookupRow}>
+                <strong>Date:</strong> {formatDate(booking.date)}
+              </div>
+              <div style={styles.lookupRow}>
+                <strong>Time:</strong> {booking.rentalTime || "—"}
+              </div>
+              <div style={styles.lookupRow}>
+                <strong>Status:</strong>{" "}
+                <span style={statusPillStyle(booking.status || "new")}>
+                  {normalizeStatusLabel(booking.status || "new")}
+                </span>
+              </div>
+              <div style={styles.lookupRow}>
+                <strong>Payment:</strong>{" "}
+                <span style={statusPillStyle(booking.paymentStatus || "unpaid")}>
+                  {normalizeStatusLabel(booking.paymentStatus || "unpaid")}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function AdminPage() {
+  const [bookings, setBookings] = useState([])
+  const [blockedDates, setBlockedDates] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState("")
+  const [error, setError] = useState("")
+
+  const [blockDate, setBlockDate] = useState("")
+  const [blockReason, setBlockReason] = useState("")
+  const [blockRentalLabel, setBlockRentalLabel] = useState("All Rentals")
+
+  async function loadAdminData() {
+    setLoading(true)
+    setError("")
+    setMessage("")
+
+    try {
+      const [bookingsRes, blockedRes] = await Promise.all([
+        fetch(`${API}/api/admin/bookings`),
+        fetch(`${API}/api/admin/blocked-dates`),
+      ])
+
+      const bookingsData = await bookingsRes.json().catch(() => [])
+      const blockedData = await blockedRes.json().catch(() => [])
+
+      if (!bookingsRes.ok) {
+        throw new Error(bookingsData?.error || "Could not load admin bookings.")
+      }
+
+      if (!blockedRes.ok) {
+        throw new Error(blockedData?.error || "Could not load blocked dates.")
+      }
+
+      setBookings(Array.isArray(bookingsData) ? bookingsData : bookingsData.bookings || [])
+      setBlockedDates(Array.isArray(blockedData) ? blockedData : blockedData.blockedDates || [])
+    } catch (err) {
+      console.error(err)
+      setError(err.message || "Could not load admin page.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadAdminData()
+  }, [])
+
+  async function approveBooking(id) {
+    setError("")
+    setMessage("Approving booking...")
+
+    try {
+      const res = await fetch(`${API}/api/admin/approve/${id}`, {
+        method: "POST",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not approve booking.")
+        setMessage("")
+        return
+      }
+
+      setMessage(`Booking ${id} approved.`)
+      loadAdminData()
+    } catch (err) {
+      console.error(err)
+      setError("Server error while approving booking.")
+      setMessage("")
+    }
+  }
+
+  async function denyBooking(id) {
+    setError("")
+    setMessage("Denying booking...")
+
+    try {
+      const res = await fetch(`${API}/api/admin/deny/${id}`, {
+        method: "POST",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not deny booking.")
+        setMessage("")
+        return
+      }
+
+      setMessage(`Booking ${id} denied.`)
+      loadAdminData()
+    } catch (err) {
+      console.error(err)
+      setError("Server error while denying booking.")
+      setMessage("")
+    }
+  }
+
+  async function markConfirmed(id) {
+    setError("")
+    setMessage("Marking booking confirmed...")
+
+    try {
+      const res = await fetch(`${API}/api/admin/bookings/${id}/confirm`, {
+        method: "POST",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not confirm booking.")
+        setMessage("")
+        return
+      }
+
+      setMessage(`Booking ${id} marked confirmed.`)
+      loadAdminData()
+    } catch (err) {
+      console.error(err)
+      setError("Server error while confirming booking.")
+      setMessage("")
+    }
+  }
+
+  async function sendDepositLink(id) {
+    setError("")
+    setMessage("Creating deposit link...")
+
+    try {
+      const res = await fetch(`${API}/api/admin/deposit-link/${id}`, {
+        method: "POST",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not create deposit link.")
+        setMessage("")
+        return
+      }
+
+      if (data.url) {
+        window.open(data.url, "_blank", "noopener,noreferrer")
+      }
+
+      setMessage(`Deposit link created for booking ${id}.`)
+      loadAdminData()
+    } catch (err) {
+      console.error(err)
+      setError("Server error while creating deposit link.")
+      setMessage("")
+    }
+  }
+
+  async function createBlockedDate() {
+    if (!blockDate) {
+      setError("Please choose a date to block.")
+      setMessage("")
+      return
+    }
+
+    setError("")
+    setMessage("Blocking date...")
+
+    try {
+      const res = await fetch(`${API}/api/admin/block-date`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          date: blockDate,
+          reason: blockReason.trim(),
+          rentalLabel: blockRentalLabel === "All Rentals" ? null : blockRentalLabel,
+        }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not block date.")
+        setMessage("")
+        return
+      }
+
+      setMessage("Date blocked successfully.")
+      setBlockDate("")
+      setBlockReason("")
+      setBlockRentalLabel("All Rentals")
+      loadAdminData()
+    } catch (err) {
+      console.error(err)
+      setError("Server error while blocking date.")
+      setMessage("")
+    }
+  }
+
+  async function removeBlockedDate(id) {
+    setError("")
+    setMessage("Removing blocked date...")
+
+    try {
+      const res = await fetch(`${API}/api/admin/block-date/${id}`, {
+        method: "DELETE",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not remove blocked date.")
+        setMessage("")
+        return
+      }
+
+      setMessage("Blocked date removed.")
+      loadAdminData()
+    } catch (err) {
+      console.error(err)
+      setError("Server error while removing blocked date.")
+      setMessage("")
+    }
+  }
+
+  return (
+    <div style={styles.adminPage}>
+      <div style={styles.adminShell}>
+        <div style={styles.adminTopBar}>
+          <div>
+            <h1 style={styles.adminTitle}>Cleared to Cruise Admin</h1>
+            <p style={styles.adminSubtitle}>
+              Approve or deny bookings, review waivers, and block dates for weather or maintenance.
+            </p>
+          </div>
+
+          <div style={styles.adminTopButtons}>
+            <button type="button" style={styles.secondaryButton} onClick={loadAdminData}>
+              Refresh Admin
+            </button>
+
+            <button
+              type="button"
+              style={styles.primaryButton}
+              onClick={() => {
+                window.location.href = "/"
+              }}
+            >
+              Return to Site
+            </button>
+          </div>
+        </div>
+
+        {message ? <div style={styles.successBox}>{message}</div> : null}
+        {error ? <div style={styles.errorBox}>{error}</div> : null}
+
+        <section style={styles.adminSection}>
+          <div style={styles.adminSectionHeader}>
+            <div>
+              <h2 style={styles.adminSectionTitle}>Block a Date</h2>
+              <p style={styles.adminSectionText}>
+                Use this for maintenance, bad weather, or manual blackout dates.
+              </p>
+            </div>
+          </div>
+
+          <div style={styles.adminBlockGrid}>
+            <label style={styles.label}>
+              Date
+              <input
+                type="date"
+                style={styles.input}
+                value={blockDate}
+                onChange={(e) => setBlockDate(e.target.value)}
+              />
+            </label>
+
+            <label style={styles.label}>
+              Rental Type
+              <select
+                style={styles.input}
+                value={blockRentalLabel}
+                onChange={(e) => setBlockRentalLabel(e.target.value)}
+              >
+                <option>All Rentals</option>
+                {rentalOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.value}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={styles.label}>
+              Reason
+              <input
+                type="text"
+                style={styles.input}
+                placeholder="Maintenance, weather, unavailable, etc."
+                value={blockReason}
+                onChange={(e) => setBlockReason(e.target.value)}
+              />
+            </label>
+
+            <div style={styles.adminBlockAction}>
+              <button type="button" style={styles.primaryButton} onClick={createBlockedDate}>
+                Block Date
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section style={styles.adminSection}>
+          <div style={styles.adminSectionHeader}>
+            <div>
+              <h2 style={styles.adminSectionTitle}>Blocked Dates</h2>
+              <p style={styles.adminSectionText}>Current manual blocks in the system.</p>
+            </div>
+          </div>
+
+          {loading ? (
+            <div style={styles.infoBox}>Loading blocked dates...</div>
+          ) : blockedDates.length === 0 ? (
+            <div style={styles.infoBox}>No blocked dates found.</div>
+          ) : (
+            <div style={styles.adminList}>
+              {blockedDates.map((item) => (
+                <div key={item.id} style={styles.adminListCard}>
+                  <div style={styles.adminListMain}>
+                    <div style={styles.adminListTitle}>{item.date}</div>
+                    <div style={styles.adminListMeta}>{item.rentalLabel || "All Rentals"}</div>
+                    <div style={styles.adminListReason}>{item.reason || "No reason entered"}</div>
+                  </div>
+
+                  <button
+                    type="button"
+                    style={styles.dangerButton}
+                    onClick={() => removeBlockedDate(item.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section style={styles.adminSection}>
+          <div style={styles.adminSectionHeader}>
+            <div>
+              <h2 style={styles.adminSectionTitle}>Bookings</h2>
+              <p style={styles.adminSectionText}>
+                Review requests, waiver status, payment status, and deposit actions.
+              </p>
+            </div>
+          </div>
+
+          {loading ? (
+            <div style={styles.infoBox}>Loading bookings...</div>
+          ) : bookings.length === 0 ? (
+            <div style={styles.infoBox}>No bookings found.</div>
+          ) : (
+            <div style={styles.bookingTableWrap}>
+              <table style={styles.bookingTable}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Booking ID</th>
+                    <th style={styles.th}>Customer</th>
+                    <th style={styles.th}>Rental</th>
+                    <th style={styles.th}>Date</th>
+                    <th style={styles.th}>Time</th>
+                    <th style={styles.th}>Tow</th>
+                    <th style={styles.th}>Waiver</th>
+                    <th style={styles.th}>Payment</th>
+                    <th style={styles.th}>Status</th>
+                    <th style={styles.th}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bookings.map((booking) => (
+                    <tr key={booking.id} style={styles.tr}>
+                      <td style={styles.td}>{booking.id}</td>
+                      <td style={styles.td}>
+                        <div style={styles.customerCell}>
+                          <strong>{booking.waiverPrintedName || "No name"}</strong>
+                          <span>{booking.customerEmail || "No email"}</span>
+                        </div>
+                      </td>
+                      <td style={styles.td}>{booking.rentalLabel || "—"}</td>
+                      <td style={styles.td}>{formatDate(booking.date)}</td>
+                      <td style={styles.td}>{booking.rentalTime || "—"}</td>
+                      <td style={styles.td}>{booking.towLocation || "None"}</td>
+                      <td style={styles.td}>
+                        <span style={statusPillStyle(booking.waiverStatus || "not_started")}>
+                          {normalizeStatusLabel(booking.waiverStatus || "not_started")}
+                        </span>
+                      </td>
+                      <td style={styles.td}>
+                        <span style={statusPillStyle(booking.paymentStatus || "unpaid")}>
+                          {normalizeStatusLabel(booking.paymentStatus || "unpaid")}
+                        </span>
+                      </td>
+                      <td style={styles.td}>
+                        <span style={statusPillStyle(booking.status || "new")}>
+                          {normalizeStatusLabel(booking.status || "new")}
+                        </span>
+                      </td>
+                      <td style={styles.td}>
+                        <div style={styles.actionsCell}>
+                          <button
+                            type="button"
+                            style={styles.smallApproveButton}
+                            onClick={() => approveBooking(booking.id)}
+                          >
+                            Approve
+                          </button>
+
+                          <button
+                            type="button"
+                            style={styles.smallDenyButton}
+                            onClick={() => denyBooking(booking.id)}
+                          >
+                            Deny
+                          </button>
+
+                          <button
+                            type="button"
+                            style={styles.smallNeutralButton}
+                            onClick={() => markConfirmed(booking.id)}
+                          >
+                            Confirm
+                          </button>
+
+                          <button
+                            type="button"
+                            style={styles.smallNeutralButton}
+                            onClick={() => sendDepositLink(booking.id)}
+                          >
+                            Deposit Link
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  )
+}
+
+function RentalCard({ card, selectedRental, onChange }) {
+  const isSelectedGroup = card.options.includes(selectedRental)
+  const currentValue = isSelectedGroup ? selectedRental : card.options[0]
+
+  return (
+    <article
+      style={{
+        ...styles.heroCard,
+        ...(isSelectedGroup ? styles.heroCardSelected : {}),
+      }}
+    >
+      <img src={card.image} alt={card.alt} style={styles.heroImage} />
+      <div style={styles.heroContent}>
+        <div>
+          <h3 style={styles.heroTitle}>{card.title}</h3>
+          <p style={styles.heroText}>{card.text}</p>
+        </div>
+
+        <div style={styles.heroSelectWrap}>
+          {card.options.length === 1 ? (
+            <button
+              type="button"
+              style={isSelectedGroup ? styles.heroSelectedButton : styles.heroChooseButton}
+              onClick={() => onChange(card.options[0])}
+            >
+              {isSelectedGroup
+                ? `Selected: ${getRentalLabel(card.options[0])}`
+                : `Choose ${getRentalLabel(card.options[0])}`}
+            </button>
+          ) : (
+            <div style={styles.heroDropdownActionWrap}>
+              <label style={styles.heroSelectLabel}>
+                Choose Option
+                <select
+                  style={styles.heroSelect}
+                  value={currentValue}
+                  onChange={(e) => onChange(e.target.value)}
+                >
+                  {card.options.map((value) => (
+                    <option key={value} value={value}>
+                      {getRentalLabel(value)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="button"
+                style={isSelectedGroup ? styles.heroSelectedButton : styles.heroChooseButton}
+                onClick={() => onChange(currentValue)}
+              >
+                {isSelectedGroup ? "Selected" : "Use This Option"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function DepositPage() {
+  const { id } = useParams()
+  const [message, setMessage] = useState("Redirecting to secure deposit authorization...")
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function startDeposit() {
+      try {
+        const res = await fetch(`${API}/api/deposit/${id}`, {
+          method: "POST",
+        })
+
+        const data = await res.json().catch(() => ({}))
+
+        if (!res.ok) {
+          if (isMounted) {
+            setMessage(data.error || "Could not create deposit authorization.")
+          }
+          return
+        }
+
+        if (data.url) {
+          window.location.href = data.url
+          return
+        }
+
+        if (isMounted) {
+          setMessage("Deposit authorization link was not returned.")
+        }
+      } catch (error) {
+        console.error(error)
+        if (isMounted) {
+          setMessage("Server error creating deposit authorization.")
+        }
+      }
+    }
+
+    startDeposit()
+
+    return () => {
+      isMounted = false
+    }
+  }, [id])
+
+  return (
+    <div style={styles.successPage}>
+      <div style={styles.successCard}>
+        <h1 style={styles.successTitle}>Security Deposit Authorization</h1>
+        <p style={styles.successText}>{message}</p>
+      </div>
+    </div>
+  )
+}
+
+function PaymentPage() {
+  const { id } = useParams()
+  const [message, setMessage] = useState("Redirecting to secure payment checkout...")
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function startPayment() {
+      try {
+        const res = await fetch(`${API}/api/create-checkout/${id}`, {
+          method: "POST",
+        })
+
+        const data = await res.json().catch(() => ({}))
+
+        if (!res.ok) {
+          if (isMounted) {
+            setMessage(data.error || "Could not create payment checkout.")
+          }
+          return
+        }
+
+        if (data.url) {
+          window.location.href = data.url
+          return
+        }
+
+        if (isMounted) {
+          setMessage("Payment checkout link was not returned.")
+        }
+      } catch (error) {
+        console.error(error)
+        if (isMounted) {
+          setMessage("Server error creating payment checkout.")
+        }
+      }
+    }
+
+    startPayment()
+
+    return () => {
+      isMounted = false
+    }
+  }, [id])
+
+  return (
+    <div style={styles.successPage}>
+      <div style={styles.successCard}>
+        <h1 style={styles.successTitle}>Complete Your Payment</h1>
+        <p style={styles.successText}>{message}</p>
+      </div>
+    </div>
+  )
+}
+
+function MainApp() {
+  const path = window.location.pathname
+  const pathParts = path.split("/")
+  const depositRequestBookingId = pathParts[1] === "deposit" ? pathParts[2] : null
+  const payRequestBookingId = pathParts[1] === "pay" ? pathParts[2] : null
+
+  const [rental, setRental] = useState("Pontoon - 6 Hours")
+  const [date, setDate] = useState("")
+  const [rentalTime, setRentalTime] = useState("07:00 AM")
+  const [location, setLocation] = useState("None")
+  const [name, setName] = useState("")
+  const [email, setEmail] = useState("")
+  const [file, setFile] = useState(null)
+
+  const [bookingId, setBookingId] = useState(null)
+  const [bookingStatus, setBookingStatus] = useState("new")
+  const [waiverStatus, setWaiverStatus] = useState("not_started")
+  const [availabilityMessage, setAvailabilityMessage] = useState("")
+  const [statusMessage, setStatusMessage] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [paying, setPaying] = useState(false)
+
+  const [showWaiver, setShowWaiver] = useState(false)
+  const [waiverAccepted, setWaiverAccepted] = useState(false)
+
+  const [successBooking, setSuccessBooking] = useState(null)
+  const [successLoading, setSuccessLoading] = useState(false)
+
+  const rentalPrice = useMemo(() => getRentalPrice(rental), [rental])
+  const towPrice = useMemo(() => getTowPrice(location), [location])
+  const totalAmount = useMemo(() => rentalPrice + towPrice, [rentalPrice, towPrice])
+
+  function resetBookingForm() {
+    setBookingId(null)
+    setBookingStatus("new")
+    setWaiverStatus("not_started")
+    setAvailabilityMessage("")
+    setStatusMessage("")
+    setRental("Pontoon - 6 Hours")
+    setDate("")
+    setRentalTime("07:00 AM")
+    setLocation("None")
+    setEmail("")
+    setName("")
+    setFile(null)
+    setShowWaiver(false)
+    setWaiverAccepted(false)
+  }
+
+  useEffect(() => {
+    async function loadSuccessBooking() {
+      if (path !== "/success") return
+
+      const params = new URLSearchParams(window.location.search)
+      const bookingIdFromUrl = params.get("bookingId")
+
+      if (!bookingIdFromUrl) return
+
+      setSuccessLoading(true)
 
       try {
-        await sendEmail({
-          to: booking.customerEmail,
-          subject: `Deposit authorization requested for booking #${booking.id}`,
-          text: `
-Please authorize your $500 security deposit card for booking #${booking.id}.
+        const res = await fetch(`${API}/api/bookings/${bookingIdFromUrl}`)
+        const data = await res.json().catch(() => null)
 
-Rental: ${booking.rentalLabel || "Boat Rental"}
-Date: ${booking.date || "Not provided"}
-Time: ${booking.rentalTime || "Not provided"}
-
-Deposit link:
-${depositUrl}
-          `.trim(),
-          html: `
-            <h2>Deposit authorization requested</h2>
-            <p>Please authorize your $500 security deposit card for booking #${booking.id}.</p>
-            <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
-            <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
-            <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
-            <p><a href="${depositUrl}">Authorize Deposit</a></p>
-          `,
-        })
-
-        await runAsync(
-          `
-          UPDATE bookings
-          SET depositRequestedAt = datetime('now'),
-              depositLinkSentAt = datetime('now'),
-              depositStatus = 'requested'
-          WHERE id = ?
-          `,
-          [booking.id]
-        )
-
-        console.log(`Scheduled deposit request sent for booking ${booking.id}`)
-      } catch (err) {
-        console.error(`Scheduled deposit request failed for booking ${booking.id}:`, err)
+        if (res.ok && data) {
+          setSuccessBooking(data)
+          setBookingStatus(data.status || "new")
+          setWaiverStatus(data.waiverStatus || "not_started")
+        }
+      } catch (error) {
+        console.error("Could not load success booking:", error)
+      } finally {
+        setSuccessLoading(false)
       }
     }
-  } catch (err) {
-    console.error("SCHEDULED DEPOSIT PROCESS ERROR:", err)
+
+    loadSuccessBooking()
+  }, [path])
+
+  const selectedRentalDescription = useMemo(() => {
+    switch (rental) {
+      case "Jet Ski (Single)":
+        return "Single jet ski rental day."
+      case "Jet Ski (Double)":
+        return "Two jet skis for the day."
+      case "Pontoon - 6 Hours":
+        return "6-hour pontoon rental."
+      case "Pontoon - 8 Hours":
+        return "8-hour pontoon rental."
+      case "Pontoon - 10 Hours":
+        return "10-hour pontoon rental."
+      case "Bass Boat - Full Day":
+        return "Full-day bass boat rental."
+      default:
+        return ""
+    }
+  }, [rental])
+
+  async function reserveSpotAndContinue() {
+    if (!date) {
+      setAvailabilityMessage("Please choose a rental date.")
+      setStatusMessage("")
+      return
+    }
+
+    if (!rentalTime) {
+      setStatusMessage("Please choose a requested rental time.")
+      setAvailabilityMessage("")
+      return
+    }
+
+    if (!email.trim()) {
+      setStatusMessage("Please enter your email address.")
+      setAvailabilityMessage("")
+      return
+    }
+
+    if (!name.trim()) {
+      setStatusMessage("Please enter your full legal name for the waiver.")
+      setAvailabilityMessage("")
+      return
+    }
+
+    if (!file) {
+      setStatusMessage("Please upload a photo ID before continuing.")
+      setAvailabilityMessage("")
+      return
+    }
+
+    setLoading(true)
+    setAvailabilityMessage("")
+    setStatusMessage("")
+
+    try {
+      const availabilityRes = await fetch(
+        `${API}/api/availability?rentalLabel=${encodeURIComponent(rental)}&date=${encodeURIComponent(date)}`
+      )
+
+      const availabilityData = await availabilityRes.json().catch(() => ({}))
+
+      if (!availabilityRes.ok) {
+        setAvailabilityMessage(availabilityData.error || "Could not check availability.")
+        return
+      }
+
+      if (!availabilityData.available) {
+        setAvailabilityMessage("That rental is not available for the selected date.")
+        return
+      }
+
+      setAvailabilityMessage("Date is available. Saving your request...")
+
+      const formData = new FormData()
+      formData.append("rentalLabel", rental)
+      formData.append("date", date)
+      formData.append("rentalTime", rentalTime)
+      formData.append("towLocation", location)
+      formData.append("waiverPrintedName", name.trim())
+      formData.append("waiverAccepted", "false")
+      formData.append("customerEmail", email.trim())
+      formData.append("photoId", file)
+
+      const bookingRes = await fetch(`${API}/api/bookings/waiver`, {
+        method: "POST",
+        body: formData,
+      })
+
+      const bookingData = await bookingRes.json().catch(() => ({}))
+
+      if (!bookingRes.ok) {
+        setStatusMessage(bookingData.error || "Could not save booking request.")
+        return
+      }
+
+      setBookingId(bookingData.bookingId)
+      setBookingStatus("pending_approval")
+      setWaiverStatus("not_started")
+      setShowWaiver(true)
+      setWaiverAccepted(false)
+      setStatusMessage(
+        `Request submitted. Booking ID: ${bookingData.bookingId}. Please review and sign the waiver.`
+      )
+    } catch (error) {
+      console.error(error)
+      setStatusMessage("Server error while saving booking request.")
+    } finally {
+      setLoading(false)
+    }
   }
+
+  async function signWaiver() {
+    if (!bookingId) {
+      setStatusMessage("Please reserve the booking first.")
+      return
+    }
+
+    if (!name.trim()) {
+      setStatusMessage("Please enter your full legal name.")
+      return
+    }
+
+    if (!waiverAccepted) {
+      setStatusMessage("You must agree to the liability waiver before signing.")
+      return
+    }
+
+    setStatusMessage("Signing waiver...")
+
+    try {
+      const res = await fetch(`${API}/api/waiver/signed/${bookingId}`, {
+        method: "POST",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setStatusMessage(data.error || "Could not mark waiver as signed.")
+        return
+      }
+
+      setWaiverStatus("signed")
+      setShowWaiver(false)
+      setStatusMessage(
+        "Waiver signed successfully. Your request is pending approval. Once approved, payment can be completed."
+      )
+    } catch (error) {
+      console.error(error)
+      setStatusMessage("Server error while signing waiver.")
+    }
+  }
+
+  async function refreshBookingStatus() {
+    if (!bookingId) {
+      setStatusMessage("No booking found yet.")
+      return
+    }
+
+    setStatusMessage("Checking booking approval status...")
+
+    try {
+      const res = await fetch(`${API}/api/bookings/${bookingId}`)
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setStatusMessage(data.error || "Could not check booking status.")
+        return
+      }
+
+      setBookingStatus(data.status || "new")
+      setWaiverStatus(data.waiverStatus || "not_started")
+
+      if (data.status === "approved_unpaid") {
+        setStatusMessage("Your rental request has been approved. You can now complete payment.")
+      } else if (data.status === "pending_approval") {
+        setStatusMessage("Your rental request is still pending approval.")
+      } else if (data.status === "confirmed") {
+        setStatusMessage("Your booking is already confirmed.")
+      } else if (data.status === "denied") {
+        setStatusMessage("Your requested rental was not approved.")
+      } else {
+        setStatusMessage(`Current booking status: ${data.status}`)
+      }
+    } catch (error) {
+      console.error(error)
+      setStatusMessage("Server error while checking booking status.")
+    }
+  }
+
+  async function payNow() {
+    if (!bookingId) {
+      setStatusMessage("No booking found yet.")
+      return
+    }
+
+    if (waiverStatus !== "signed") {
+      setStatusMessage("Waiver must be signed before payment.")
+      return
+    }
+
+    if (bookingStatus !== "approved_unpaid") {
+      setStatusMessage("Booking must be approved before payment.")
+      return
+    }
+
+    setPaying(true)
+    setStatusMessage("Creating secure checkout session...")
+
+    try {
+      const res = await fetch(`${API}/api/create-checkout/${bookingId}`, {
+        method: "POST",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setStatusMessage(data.error || "Could not create checkout session.")
+        return
+      }
+
+      if (!data.url) {
+        setStatusMessage("Checkout link was not returned.")
+        return
+      }
+
+      window.location.href = data.url
+    } catch (error) {
+      console.error(error)
+      setStatusMessage("Server error while creating checkout session.")
+    } finally {
+      setPaying(false)
+    }
+  }
+
+  if (path === "/admin") {
+    return <AdminPage />
+  }
+
+  if (depositRequestBookingId) {
+    return (
+      <div style={styles.successPage}>
+        <div style={styles.successCard}>
+          <h1 style={styles.successTitle}>Security Deposit Authorization</h1>
+          <p style={styles.successText}>
+            Please securely authorize your $500 security deposit hold using the button below.
+          </p>
+          <p style={styles.successText}>
+            This is a hold for damage protection, not the rental charge itself.
+          </p>
+          <button
+            style={styles.primaryButton}
+            onClick={async () => {
+              try {
+                const res = await fetch(`${API}/api/deposit/${depositRequestBookingId}`, {
+                  method: "POST",
+                })
+                const data = await res.json().catch(() => ({}))
+
+                if (res.ok && data.url) {
+                  window.location.href = data.url
+                } else {
+                  alert(data.error || "Could not open deposit authorization.")
+                }
+              } catch (error) {
+                console.error(error)
+                alert("Server error opening deposit authorization.")
+              }
+            }}
+          >
+            Authorize $500 Deposit
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (payRequestBookingId) {
+    return (
+      <div style={styles.successPage}>
+        <div style={styles.successCard}>
+          <h1 style={styles.successTitle}>Complete Your Payment</h1>
+          <p style={styles.successText}>
+            Your booking has been approved. Click below to open secure checkout.
+          </p>
+
+          <button
+            style={styles.primaryButton}
+            onClick={async () => {
+              try {
+                const res = await fetch(`${API}/api/create-checkout/${payRequestBookingId}`, {
+                  method: "POST",
+                })
+                const data = await res.json().catch(() => ({}))
+
+                if (res.ok && data.url) {
+                  window.location.href = data.url
+                } else {
+                  alert(data.error || "Could not create checkout session.")
+                }
+              } catch (error) {
+                console.error(error)
+                alert("Server error while creating checkout.")
+              }
+            }}
+          >
+            Pay Rental Now
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (path === "/success") {
+    return (
+      <div style={styles.successPage}>
+        <div style={styles.successCard}>
+          <h1 style={styles.successTitle}>✅ Payment Successful</h1>
+          <p style={styles.successText}>
+            Your payment was successful and your booking details are shown below.
+          </p>
+
+          {successLoading ? (
+            <p style={styles.successText}>Loading booking details...</p>
+          ) : successBooking ? (
+            <div style={styles.successDetails}>
+              <div>
+                <strong>Booking ID:</strong> {successBooking.id}
+              </div>
+              <div>
+                <strong>Rental:</strong> {successBooking.rentalLabel}
+              </div>
+              <div>
+                <strong>Date:</strong> {successBooking.date}
+              </div>
+              <div>
+                <strong>Time:</strong> {successBooking.rentalTime || "Not provided"}
+              </div>
+              <div>
+                <strong>Tow Location:</strong> {successBooking.towLocation}
+              </div>
+              <div>
+                <strong>Email:</strong> {successBooking.customerEmail || "Not provided"}
+              </div>
+              <div>
+                <strong>Payment Status:</strong>{" "}
+                {normalizeStatusLabel(successBooking.paymentStatus)}
+              </div>
+              <div>
+                <strong>Status:</strong> {normalizeStatusLabel(successBooking.status)}
+              </div>
+            </div>
+          ) : (
+            <p style={styles.successText}>
+              Your payment was processed. Booking details were not available on this page.
+            </p>
+          )}
+
+          <button
+            style={styles.primaryButton}
+            onClick={() => {
+              window.location.href = "/"
+            }}
+          >
+            Return Home
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (path === "/cancel") {
+    return (
+      <div style={styles.successPage}>
+        <div style={styles.successCard}>
+          <h1 style={styles.cancelTitle}>❌ Payment Cancelled</h1>
+          <p style={styles.successText}>Your checkout was cancelled. No payment was completed.</p>
+          <button
+            style={styles.primaryButton}
+            onClick={() => {
+              window.location.href = "/"
+            }}
+          >
+            Return Home
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={styles.page}>
+      <header style={styles.header}>
+        <div style={styles.headerRow}>
+          <div>
+            <h1 style={styles.title}>Cleared to Cruise</h1>
+            <p style={styles.subtitle}>
+              Boat rentals, waiver confirmation, approval workflow, and secure online checkout
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <section style={styles.topGrid}>
+        <div style={styles.topCardLarge}>
+          <img src="/images/castaic-lake.jpg" alt="Castaic Lake" style={styles.largeImage} />
+          <div style={styles.imageOverlay}>
+            <h2 style={styles.overlayTitle}>Castaic Lake</h2>
+            <p style={styles.overlayText}>Tow option available</p>
+            <a
+              href={CASTAIC_INFO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={styles.overlayLinkButton}
+            >
+              Official Rules & Info
+            </a>
+          </div>
+        </div>
+
+        <div style={styles.topCardLarge}>
+          <img src="/images/pyramid-lake.jpg" alt="Pyramid Lake" style={styles.largeImage} />
+          <div style={styles.imageOverlay}>
+            <h2 style={styles.overlayTitle}>Pyramid Lake</h2>
+            <p style={styles.overlayText}>Tow option available</p>
+            <a
+              href={PYRAMID_INFO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={styles.overlayLinkButton}
+            >
+              Official Rules & Info
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section style={styles.heroGrid}>
+        {heroRentalGroups.map((card) => (
+          <RentalCard
+            key={card.key}
+            card={card}
+            selectedRental={rental}
+            onChange={(value) => {
+              setRental(value)
+              setAvailabilityMessage("")
+              setStatusMessage("")
+            }}
+          />
+        ))}
+      </section>
+
+      <section style={styles.mainCard}>
+        <div style={styles.formHeaderRow}>
+          <div>
+            <h2 style={styles.sectionTitle}>Reserve Your Rental</h2>
+            <p style={styles.sectionSubtext}>{selectedRentalDescription}</p>
+          </div>
+
+          <div style={styles.formHeaderActions}>
+            <div style={styles.badge}>{bookingId ? `Booking #${bookingId}` : "New Booking"}</div>
+          </div>
+        </div>
+
+        <div style={styles.selectedRentalBar}>
+          <span style={styles.selectedRentalLabel}>Selected Rental</span>
+          <strong style={styles.selectedRentalValue}>{getRentalLabel(rental)}</strong>
+        </div>
+
+        <div style={styles.formGrid}>
+          <label style={styles.label}>
+            Rental Date
+            <input
+              style={styles.input}
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </label>
+
+          <label style={styles.label}>
+            Requested Rental Time
+            <select
+              style={styles.input}
+              value={rentalTime}
+              onChange={(e) => setRentalTime(e.target.value)}
+            >
+              {timeOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={styles.label}>
+            Tow Location
+            <select
+              style={styles.input}
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+            >
+              {towOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={styles.label}>
+            Email Address
+            <input
+              style={styles.input}
+              type="email"
+              placeholder="customer@email.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </label>
+
+          <label style={styles.label}>
+            Full Legal Name for Waiver Signature
+            <input
+              style={styles.input}
+              type="text"
+              placeholder="Your full legal name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+
+          <label style={styles.labelFull}>
+            Upload Photo ID
+            <input
+              style={styles.fileInput}
+              type="file"
+              accept="image/*,.pdf"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+            <span style={styles.fileName}>
+              {file ? `Selected: ${file.name}` : "No file selected yet"}
+            </span>
+          </label>
+        </div>
+
+        <div style={styles.priceSummary}>
+          <div style={styles.priceRow}>
+            <span>Rental</span>
+            <strong>${rentalPrice}</strong>
+          </div>
+          <div style={styles.priceRow}>
+            <span>Tow Fee</span>
+            <strong>${towPrice}</strong>
+          </div>
+          <div style={styles.priceRowTotal}>
+            <span>Total Amount Owed</span>
+            <strong>${totalAmount} + fuel</strong>
+          </div>
+        </div>
+
+        <div style={styles.buttonRow}>
+          <button
+            type="button"
+            style={loading ? styles.buttonDisabled : styles.primaryButton}
+            onClick={reserveSpotAndContinue}
+            disabled={loading}
+          >
+            {loading ? "Checking..." : "Submit Request"}
+          </button>
+
+          <button
+            type="button"
+            style={
+              !bookingId || waiverStatus === "signed"
+                ? styles.buttonDisabled
+                : styles.secondaryButton
+            }
+            onClick={() => setShowWaiver(true)}
+            disabled={!bookingId || waiverStatus === "signed"}
+          >
+            {waiverStatus === "signed" ? "Waiver Signed" : "Review Waiver"}
+          </button>
+
+          <button
+            type="button"
+            style={
+              bookingStatus !== "approved_unpaid" || waiverStatus !== "signed" || paying
+                ? styles.buttonDisabled
+                : styles.primaryButton
+            }
+            onClick={payNow}
+            disabled={bookingStatus !== "approved_unpaid" || waiverStatus !== "signed" || paying}
+          >
+            {paying ? "Redirecting..." : "Pay Rental Now"}
+          </button>
+
+          <button
+            type="button"
+            style={!bookingId ? styles.buttonDisabled : styles.secondaryButton}
+            onClick={refreshBookingStatus}
+            disabled={!bookingId}
+          >
+            Refresh Approval Status
+          </button>
+
+          <button type="button" style={styles.secondaryButton} onClick={resetBookingForm}>
+            Clear Form
+          </button>
+        </div>
+
+        {bookingId && showWaiver ? (
+          <section style={styles.waiverCard}>
+            <h3 style={styles.waiverTitle}>Liability Waiver and Electronic Signature Agreement</h3>
+
+            <div style={styles.waiverBox}>
+              <p>
+                I understand that participation in boating, jet ski use, towing, loading,
+                launching, docking, swimming, and other water activities involves inherent risks,
+                including but not limited to serious bodily injury, permanent disability, death,
+                collisions, drowning, falling, equipment failure, property damage, and damage to
+                other persons or property.
+              </p>
+
+              <p>
+                I voluntarily choose to participate in this rental activity and I accept all risks
+                associated with the use, transport, operation, and possession of the rental
+                equipment during my rental period.
+              </p>
+
+              <p>
+                I agree to operate the boat, jet ski, trailer, and all rental equipment in a safe
+                and lawful manner. I accept full responsibility for my own safety, the safety of my
+                passengers, and the conduct of anyone allowed by me to use or ride in the rental
+                equipment.
+              </p>
+
+              <p>
+                I agree to release, indemnify, and hold harmless Cleared to Cruise, its owners,
+                agents, representatives, and affiliates from claims, demands, liabilities, losses,
+                damages, expenses, or causes of action arising out of or related to my rental,
+                possession, transportation, or use of the rental equipment, except where prohibited
+                by law.
+              </p>
+
+              <p>
+                I understand and agree that I am financially responsible for any loss or damage to
+                the boat, jet ski, trailer, motor, propeller, accessories, safety equipment, or
+                any other rental equipment during my rental period, regardless of whether caused by
+                me, my passengers, or any person using the equipment with my permission.
+              </p>
+
+              <p>
+                I also agree to be responsible for injury, damage, or loss caused to other persons,
+                boats, docks, vehicles, structures, or other property arising from my rental or
+                operation of the rental equipment.
+              </p>
+
+              <p>
+                I confirm that the full legal name I typed on this booking form is my electronic
+                signature for this liability waiver and rental agreement. I also confirm that the
+                photo identification uploaded with this booking belongs to me and that the
+                information I provided is true and correct.
+              </p>
+
+              <p>
+                By checking the agreement box below and signing electronically, I acknowledge that
+                I have read this waiver carefully, understand its contents, and agree to be legally
+                bound by it.
+              </p>
+            </div>
+
+            <label style={styles.checkboxRow}>
+              <input
+                type="checkbox"
+                checked={waiverAccepted}
+                onChange={(e) => setWaiverAccepted(e.target.checked)}
+              />
+              <span>
+                I have read and agree to this liability waiver and electronic signature agreement.
+              </span>
+            </label>
+
+            <button
+              type="button"
+              style={
+                !waiverAccepted || !name.trim() ? styles.buttonDisabled : styles.secondaryButton
+              }
+              onClick={signWaiver}
+              disabled={!waiverAccepted || !name.trim()}
+            >
+              I Agree and Sign Waiver
+            </button>
+          </section>
+        ) : null}
+
+        <div style={styles.statusGrid}>
+          <div style={styles.statusCard}>
+            <span style={styles.statusLabel}>Booking ID</span>
+            <span style={styles.statusValue}>{bookingId || "Not created yet"}</span>
+          </div>
+
+          <div style={styles.statusCard}>
+            <span style={styles.statusLabel}>Booking Status</span>
+            <span style={styles.statusValue}>{normalizeStatusLabel(bookingStatus)}</span>
+          </div>
+
+          <div style={styles.statusCard}>
+            <span style={styles.statusLabel}>Waiver Status</span>
+            <span style={styles.statusValue}>{normalizeStatusLabel(waiverStatus)}</span>
+          </div>
+
+          <div style={styles.statusCard}>
+            <span style={styles.statusLabel}>Rental</span>
+            <span style={styles.statusValue}>{rental}</span>
+          </div>
+
+          <div style={styles.statusCard}>
+            <span style={styles.statusLabel}>Date</span>
+            <span style={styles.statusValue}>{date || "Not selected"}</span>
+          </div>
+
+          <div style={styles.statusCard}>
+            <span style={styles.statusLabel}>Time</span>
+            <span style={styles.statusValue}>{rentalTime || "Not selected"}</span>
+          </div>
+        </div>
+
+        {availabilityMessage ? <div style={styles.successBox}>{availabilityMessage}</div> : null}
+        {statusMessage ? <div style={styles.infoBox}>{statusMessage}</div> : null}
+      </section>
+
+      <BookingLookupCard />
+    </div>
+  )
 }
 
-setInterval(processScheduledDepositRequests, 60 * 60 * 1000)
-setTimeout(processScheduledDepositRequests, 10 * 1000)
-
-// -----------------------------
-// START
-// -----------------------------
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`)
-})
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<MainApp />} />
+        <Route path="/deposit/:id" element={<DepositPage />} />
+        <Route path="/pay/:id" element={<PaymentPage />} />
+        <Route path="/success" element={<MainApp />} />
+        <Route path="/cancel" element={<MainApp />} />
+        <Route path="/admin" element={<MainApp />} />
+      </Routes>
+    </BrowserRouter>
+  )
+}

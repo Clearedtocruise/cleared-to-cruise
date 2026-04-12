@@ -1,4 +1,7 @@
+Full front end
+
 import { useEffect, useMemo, useState } from "react"
+import { BrowserRouter, Routes, Route, useParams } from "react-router-dom"
 
 const API = "https://cleared-to-cruise-api.onrender.com"
 
@@ -868,7 +871,117 @@ function RentalCard({ card, selectedRental, onChange }) {
   )
 }
 
-export default function App() {
+function DepositPage() {
+  const { id } = useParams()
+  const [message, setMessage] = useState("Redirecting to secure deposit authorization...")
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function startDeposit() {
+      try {
+        const res = await fetch(`${API}/api/deposit/${id}`, {
+          method: "POST",
+        })
+
+        const data = await res.json().catch(() => ({}))
+
+        if (!res.ok) {
+          if (isMounted) {
+            setMessage(data.error || "Could not create deposit authorization.")
+          }
+          return
+        }
+
+        if (data.url) {
+          window.location.href = data.url
+          return
+        }
+
+        if (isMounted) {
+          setMessage("Deposit authorization link was not returned.")
+        }
+      } catch (error) {
+        console.error(error)
+        if (isMounted) {
+          setMessage("Server error creating deposit authorization.")
+        }
+      }
+    }
+
+    startDeposit()
+
+    return () => {
+      isMounted = false
+    }
+  }, [id])
+
+  return (
+    <div style={styles.successPage}>
+      <div style={styles.successCard}>
+        <h1 style={styles.successTitle}>Security Deposit Authorization</h1>
+        <p style={styles.successText}>{message}</p>
+      </div>
+    </div>
+  )
+}
+
+function PaymentPage() {
+  const { id } = useParams()
+  const [message, setMessage] = useState("Redirecting to secure payment checkout...")
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function startPayment() {
+      try {
+        const res = await fetch(`${API}/api/create-checkout/${id}`, {
+          method: "POST",
+        })
+
+        const data = await res.json().catch(() => ({}))
+
+        if (!res.ok) {
+          if (isMounted) {
+            setMessage(data.error || "Could not create payment checkout.")
+          }
+          return
+        }
+
+        if (data.url) {
+          window.location.href = data.url
+          return
+        }
+
+        if (isMounted) {
+          setMessage("Payment checkout link was not returned.")
+        }
+      } catch (error) {
+        console.error(error)
+        if (isMounted) {
+          setMessage("Server error creating payment checkout.")
+        }
+      }
+    }
+
+    startPayment()
+
+    return () => {
+      isMounted = false
+    }
+  }, [id])
+
+  return (
+    <div style={styles.successPage}>
+      <div style={styles.successCard}>
+        <h1 style={styles.successTitle}>Complete Your Payment</h1>
+        <p style={styles.successText}>{message}</p>
+      </div>
+    </div>
+  )
+}
+
+function MainApp() {
   const path = window.location.pathname
   const pathParts = path.split("/")
   const depositRequestBookingId = pathParts[1] === "deposit" ? pathParts[2] : null
@@ -1497,7 +1610,7 @@ export default function App() {
             <span>Rental</span>
             <strong>${rentalPrice}</strong>
           </div>
-           <div style={styles.priceRow}>
+          <div style={styles.priceRow}>
             <span>Tow Fee</span>
             <strong>${towPrice}</strong>
           </div>
@@ -1680,6 +1793,21 @@ export default function App() {
 
       <BookingLookupCard />
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<MainApp />} />
+        <Route path="/deposit/:id" element={<DepositPage />} />
+        <Route path="/pay/:id" element={<PaymentPage />} />
+        <Route path="/success" element={<MainApp />} />
+        <Route path="/cancel" element={<MainApp />} />
+        <Route path="/admin" element={<MainApp />} />
+      </Routes>
+    </BrowserRouter>
   )
 }
 
