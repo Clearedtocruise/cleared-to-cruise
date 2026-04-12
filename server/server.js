@@ -111,13 +111,28 @@ function adminViewUrl() {
   return `${SITE_URL}/admin`
 }
 
-function isWithinNextThreeDays(dateValue) {
-  if (!dateValue) return false
+function daysUntilBooking(dateValue) {
+  if (!dateValue) return null
+
   const now = new Date()
-  const target = new Date(`${dateValue}T23:59:59`)
-  const diffMs = target.getTime() - now.getTime()
-  const diffDays = diffMs / (1000 * 60 * 60 * 24)
-  return diffDays <= 3
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+
+  const [year, month, day] = String(dateValue).split("-").map(Number)
+  if (!year || !month || !day) return null
+
+  const bookingDate = new Date(Date.UTC(year, month - 1, day))
+  const diffMs = bookingDate.getTime() - today.getTime()
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24))
+}
+
+function isWithinThreeDaysOrLess(dateValue) {
+  const days = daysUntilBooking(dateValue)
+  return days !== null && days <= 3
+}
+
+function isExactlyThreeDaysAway(dateValue) {
+  const days = daysUntilBooking(dateValue)
+  return days === 3
 }
 
 function requireAdminToken(req, res, next) {
@@ -826,7 +841,7 @@ app.post("/api/bookings/waiver", upload.single("photoId"), (req, res) => {
         createdAt,
         "not_scheduled",
       ],
-      function (err) {
+      async function (err) {
         if (err) {
           console.error("CREATE BOOKING ERROR:", err)
           return res.status(500).json({ error: "Could not create booking." })
@@ -896,8 +911,8 @@ You can check your status later with:
 Booking ID: ${bookingId}
 Email: ${normalizedCustomerEmail}
 
-Deposit link:
-${depositUrl}
+Your rental payment link will be sent after approval.
+Your deposit authorization link will be sent 3 days before your booking date, or immediately if the booking is already within 3 days.
                 `.trim(),
                 html: `
                   <h2>Your booking request has been received</h2>
@@ -907,7 +922,8 @@ ${depositUrl}
                   <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
                   <p><strong>Tow Location:</strong> ${escapeHtml(towLocation || "None")}</p>
                   <p>You can check your status later using your booking ID and email.</p>
-                  <p><strong>Deposit Link:</strong> <a href="${depositUrl}">${depositUrl}</a></p>
+                  <p>Your rental payment link will be sent after approval.</p>
+                  <p>Your deposit authorization link will be sent 3 days before your booking date, or immediately if the booking is already within 3 days.</p>
                 `,
               })
             : Promise.resolve(),
@@ -922,7 +938,7 @@ ${depositUrl}
           })
         })
 
-        if (normalizedCustomerEmail && isWithinNextThreeDays(date)) {
+        if (normalizedCustomerEmail && isWithinThreeDaysOrLess(date)) {
           Promise.allSettled([
             sendEmail({
               to: normalizedCustomerEmail,
@@ -930,17 +946,24 @@ ${depositUrl}
               text: `
 Please authorize your $500 security deposit card for booking #${bookingId}.
 
+Rental: ${rentalLabel}
+Date: ${date}
+Time: ${rentalTime || "Not provided"}
+
 Deposit link:
 ${depositUrl}
               `.trim(),
               html: `
                 <h2>Security deposit authorization requested</h2>
                 <p>Please authorize your $500 security deposit card for booking #${bookingId}.</p>
+                <p><strong>Rental:</strong> ${escapeHtml(rentalLabel)}</p>
+                <p><strong>Date:</strong> ${escapeHtml(date)}</p>
+                <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
                 <p><a href="${depositUrl}">Authorize Deposit</a></p>
               `,
             }),
             runAsync(
-              `UPDATE bookings SET depositLinkSentAt = datetime('now'), depositStatus = 'requested' WHERE id = ?`,
+              `UPDATE bookings SET depositLinkSentAt = datetime('now'), depositRequestedAt = datetime('now'), depositStatus = 'requested' WHERE id = ?`,
               [bookingId]
             ),
           ]).catch((depositErr) => {
@@ -1208,7 +1231,6 @@ app.post("/api/deposit/:id", async (req, res) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: "setup",
-      currency: "usd",
       customer_email: booking.customerEmail || undefined,
       success_url: `${SITE_URL}/success?bookingId=${booking.id}`,
       cancel_url: `${SITE_URL}/cancel`,
@@ -1448,12 +1470,19 @@ async function depositLinkHandler(req, res) {
         text: `
 Please authorize your $500 security deposit card for booking #${booking.id}.
 
+Rental: ${booking.rentalLabel || "Boat Rental"}
+Date: ${booking.date || "Not provided"}
+Time: ${booking.rentalTime || "Not provided"}
+
 Deposit link:
 ${depositUrl}
         `.trim(),
         html: `
           <h2>Deposit authorization requested</h2>
           <p>Please authorize your $500 security deposit card for booking #${booking.id}.</p>
+          <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
+          <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
+          <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
           <p><a href="${depositUrl}">Authorize Deposit</a></p>
         `,
       })
@@ -1807,14 +1836,14 @@ async function processScheduledDepositRequests() {
         AND customerEmail != ''
         AND status IN ('approved_unpaid', 'confirmed', 'pending_payment')
         AND (
-          depositStatus IS NULL
-          OR depositStatus IN ('not_scheduled')
+          depositLinkSentAt IS NULL
+          OR depositLinkSentAt = ''
         )
       `
     )
 
     for (const booking of rows) {
-      if (!isWithinNextThreeDays(booking.date)) {
+      if (!isExactlyThreeDaysAway(booking.date)) {
         continue
       }
 
@@ -1827,12 +1856,19 @@ async function processScheduledDepositRequests() {
           text: `
 Please authorize your $500 security deposit card for booking #${booking.id}.
 
+Rental: ${booking.rentalLabel || "Boat Rental"}
+Date: ${booking.date || "Not provided"}
+Time: ${booking.rentalTime || "Not provided"}
+
 Deposit link:
 ${depositUrl}
           `.trim(),
           html: `
             <h2>Deposit authorization requested</h2>
             <p>Please authorize your $500 security deposit card for booking #${booking.id}.</p>
+            <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
+            <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
+            <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
             <p><a href="${depositUrl}">Authorize Deposit</a></p>
           `,
         })
