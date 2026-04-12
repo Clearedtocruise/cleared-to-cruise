@@ -1795,7 +1795,7 @@ const styles = {
     fontWeight: 800,
     color: "#203445",
   },
-  heroSelect: {
+    heroSelect: {
     width: "100%",
     padding: "12px 14px",
     borderRadius: "12px",
@@ -1805,6 +1805,30 @@ const styles = {
     color: "#102030",
     outline: "none",
     boxSizing: "border-box",
+  },
+  heroChooseButton: {
+    width: "100%",
+    border: "1px solid #cfd9e3",
+    background: "#ffffff",
+    color: "#102030",
+    padding: "12px 14px",
+    borderRadius: "12px",
+    fontSize: "14px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+
+  heroSelectedButton: {
+    width: "100%",
+    border: "none",
+    background: "#0f2233",
+    color: "#ffffff",
+    padding: "12px 14px",
+    borderRadius: "12px",
+    fontSize: "14px",
+    fontWeight: 800,
+    cursor: "pointer",
+    boxShadow: "0 8px 20px rgba(15, 34, 51, 0.16)",
   },
   mainCard: {
     maxWidth: "1200px",
