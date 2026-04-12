@@ -24,8 +24,9 @@ const CLIENT_URL = (process.env.CLIENT_URL || "http://localhost:5173").replace(/
 const SITE_URL = (process.env.SITE_URL || CLIENT_URL).replace(/\/$/, "")
 const API_URL = (process.env.API_URL || `http://localhost:${PORT}`).replace(/\/$/, "")
 const ADMIN_ACTION_TOKEN = String(process.env.ADMIN_ACTION_TOKEN || "").trim()
-const ADMIN_NOTIFICATION_EMAIL =
-  String(process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER || "").trim()
+const ADMIN_NOTIFICATION_EMAIL = String(
+  process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER || ""
+).trim()
 
 if (!process.env.STRIPE_SECRET_KEY) {
   console.warn("WARNING: STRIPE_SECRET_KEY is not set.")
@@ -34,33 +35,100 @@ if (!process.env.STRIPE_SECRET_KEY) {
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "")
 
 // -----------------------------
-// CORS
+// HELPERS
 // -----------------------------
-const allowedOrigins = [
-  CLIENT_URL,
-  SITE_URL,
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "http://localhost:4173",
-  "http://127.0.0.1:4173",
-  "https://clearedtocruiserentals.com",
-  "https://www.clearedtocruiserentals.com",
-  "https://cleared-to-cruise.vercel.app",
-]
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;")
+}
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true)
-      }
-      return callback(new Error(`CORS not allowed for origin: ${origin}`))
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-admin-token"],
-    credentials: true,
-  })
-)
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase()
+}
+
+function statusLabel(value) {
+  return String(value || "").replaceAll("_", " ")
+}
+
+function rentalBoatType(label) {
+  const lower = String(label || "").toLowerCase()
+  if (lower.includes("pontoon")) return "Pontoon"
+  if (lower.includes("bass")) return "Bass Boat"
+  if (lower.includes("jet ski")) return "Jet Ski"
+  return "All Rentals"
+}
+
+function rentalBasePrice(label) {
+  switch (label) {
+    case "Jet Ski (Single)":
+      return 40000
+    case "Jet Ski (Double)":
+      return 75000
+    case "Pontoon - 6 Hours":
+      return 60000
+    case "Pontoon - 8 Hours":
+      return 75000
+    case "Pontoon - 10 Hours":
+      return 90000
+    case "Bass Boat - Full Day":
+      return 40000
+    default:
+      return 0
+  }
+}
+
+function towFeeForLocation(location) {
+  if (location === "Castaic") return 7500
+  if (location === "Pyramid") return 15000
+  return 0
+}
+
+function totalPrice(booking) {
+  return rentalBasePrice(booking.rentalLabel) + towFeeForLocation(booking.towLocation)
+}
+
+function formatDepositRequestUrl(bookingId) {
+  return `${SITE_URL}/deposit/${bookingId}`
+}
+
+function adminApproveUrl(bookingId) {
+  return `${API_URL}/api/admin/approve/${bookingId}?token=${encodeURIComponent(ADMIN_ACTION_TOKEN)}`
+}
+
+function adminDenyUrl(bookingId) {
+  return `${API_URL}/api/admin/deny/${bookingId}?token=${encodeURIComponent(ADMIN_ACTION_TOKEN)}`
+}
+
+function adminViewUrl() {
+  return `${SITE_URL}/admin`
+}
+
+function isWithinNextThreeDays(dateValue) {
+  if (!dateValue) return false
+  const now = new Date()
+  const target = new Date(`${dateValue}T23:59:59`)
+  const diffMs = target.getTime() - now.getTime()
+  const diffDays = diffMs / (1000 * 60 * 60 * 24)
+  return diffDays <= 3
+}
+
+function requireAdminToken(req, res, next) {
+  if (!ADMIN_ACTION_TOKEN) {
+    return res.status(500).send("ADMIN_ACTION_TOKEN is not configured on the server.")
+  }
+
+  const token = String(req.query.token || req.headers["x-admin-token"] || "").trim()
+
+  if (!token || token !== ADMIN_ACTION_TOKEN) {
+    return res.status(403).send("Forbidden")
+  }
+
+  next()
+}
 
 // -----------------------------
 // EMAIL
@@ -96,36 +164,94 @@ async function sendEmail({ to, subject, text, html }) {
   })
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;")
+async function sendAdminApprovalEmail(booking) {
+  const approveUrl = adminApproveUrl(booking.id)
+  const denyUrl = adminDenyUrl(booking.id)
+  const photoUrl = booking.photoIdPath
+    ? `${API_URL}/${String(booking.photoIdPath).replace(/^\.?\//, "")}`
+    : ""
+
+  return sendEmail({
+    to: ADMIN_NOTIFICATION_EMAIL,
+    subject: `Approve or deny booking #${booking.id}`,
+    text: `
+A new booking requires review.
+
+Booking ID: ${booking.id}
+Name: ${booking.waiverPrintedName || "No name"}
+Email: ${booking.customerEmail || "No email"}
+Rental: ${booking.rentalLabel || "Boat Rental"}
+Date: ${booking.date || "Not provided"}
+Time: ${booking.rentalTime || "Not provided"}
+Tow Location: ${booking.towLocation || "None"}
+Status: ${statusLabel(booking.status || "pending_approval")}
+
+Approve:
+${approveUrl}
+
+Deny:
+${denyUrl}
+
+Admin page:
+${adminViewUrl()}
+
+Photo ID:
+${photoUrl || "Not available"}
+    `.trim(),
+    html: `
+      <h2>New booking requires review</h2>
+      <p><strong>Booking ID:</strong> ${booking.id}</p>
+      <p><strong>Name:</strong> ${escapeHtml(booking.waiverPrintedName || "No name")}</p>
+      <p><strong>Email:</strong> ${escapeHtml(booking.customerEmail || "No email")}</p>
+      <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
+      <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
+      <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
+      <p><strong>Tow Location:</strong> ${escapeHtml(booking.towLocation || "None")}</p>
+      <p><strong>Status:</strong> ${escapeHtml(statusLabel(booking.status || "pending_approval"))}</p>
+      ${
+        photoUrl
+          ? `<p><strong>Photo ID:</strong> <a href="${photoUrl}" target="_blank" rel="noopener noreferrer">View uploaded ID</a></p>`
+          : ""
+      }
+      <div style="margin-top:24px;">
+        <a href="${approveUrl}" style="display:inline-block;padding:12px 18px;background:#157347;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;margin-right:10px;">Approve Booking</a>
+        <a href="${denyUrl}" style="display:inline-block;padding:12px 18px;background:#b42318;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">Deny Booking</a>
+      </div>
+      <p style="margin-top:18px;">
+        <a href="${adminViewUrl()}" target="_blank" rel="noopener noreferrer">Open admin page</a>
+      </p>
+    `,
+  })
 }
 
-function normalizeEmail(value) {
-  return String(value || "").trim().toLowerCase()
-}
+// -----------------------------
+// CORS
+// -----------------------------
+const allowedOrigins = [
+  CLIENT_URL,
+  SITE_URL,
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+  "https://clearedtocruiserentals.com",
+  "https://www.clearedtocruiserentals.com",
+  "https://cleared-to-cruise.vercel.app",
+]
 
-function statusLabel(value) {
-  return String(value || "").replaceAll("_", " ")
-}
-
-function requireAdminToken(req, res, next) {
-  if (!ADMIN_ACTION_TOKEN) {
-    return res.status(500).send("ADMIN_ACTION_TOKEN is not configured on the server.")
-  }
-
-  const token = String(req.query.token || req.headers["x-admin-token"] || "").trim()
-
-  if (!token || token !== ADMIN_ACTION_TOKEN) {
-    return res.status(403).send("Forbidden")
-  }
-
-  next()
-}
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true)
+      }
+      return callback(new Error(`CORS not allowed for origin: ${origin}`))
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-admin-token"],
+    credentials: true,
+  })
+)
 
 // -----------------------------
 // STRIPE WEBHOOK FIRST
@@ -366,131 +492,6 @@ function allAsync(sql, params = []) {
       if (err) return reject(err)
       resolve(rows)
     })
-  })
-}
-
-// -----------------------------
-// HELPERS
-// -----------------------------
-function rentalBoatType(label) {
-  const lower = String(label || "").toLowerCase()
-  if (lower.includes("pontoon")) return "Pontoon"
-  if (lower.includes("bass")) return "Bass Boat"
-  if (lower.includes("jet ski")) return "Jet Ski"
-  return "All Rentals"
-}
-
-function rentalBasePrice(label) {
-  switch (label) {
-    case "Jet Ski (Single)":
-      return 40000
-    case "Jet Ski (Double)":
-      return 75000
-    case "Pontoon - 6 Hours":
-      return 60000
-    case "Pontoon - 8 Hours":
-      return 75000
-    case "Pontoon - 10 Hours":
-      return 90000
-    case "Bass Boat - Full Day":
-      return 40000
-    default:
-      return 0
-  }
-}
-
-function towFeeForLocation(location) {
-  if (location === "Castaic") return 7500
-  if (location === "Pyramid") return 15000
-  return 0
-}
-
-function totalPrice(booking) {
-  return rentalBasePrice(booking.rentalLabel) + towFeeForLocation(booking.towLocation)
-}
-
-function formatDepositRequestUrl(bookingId) {
-  return `${SITE_URL}/deposit/${bookingId}`
-}
-
-function adminApproveUrl(bookingId) {
-  return `${API_URL}/api/admin/approve/${bookingId}?token=${encodeURIComponent(ADMIN_ACTION_TOKEN)}`
-}
-
-function adminDenyUrl(bookingId) {
-  return `${API_URL}/api/admin/deny/${bookingId}?token=${encodeURIComponent(ADMIN_ACTION_TOKEN)}`
-}
-
-function adminViewUrl() {
-  return `${SITE_URL}/admin`
-}
-
-function isWithinNextThreeDays(dateValue) {
-  if (!dateValue) return false
-  const now = new Date()
-  const target = new Date(`${dateValue}T23:59:59`)
-  const diffMs = target.getTime() - now.getTime()
-  const diffDays = diffMs / (1000 * 60 * 60 * 24)
-  return diffDays <= 3
-}
-
-async function sendAdminApprovalEmail(booking) {
-  const approveUrl = adminApproveUrl(booking.id)
-  const denyUrl = adminDenyUrl(booking.id)
-  const photoUrl = booking.photoIdPath
-    ? `${API_URL}/${String(booking.photoIdPath).replace(/^\.?\//, "")}`
-    : ""
-
-  return sendEmail({
-    to: ADMIN_NOTIFICATION_EMAIL,
-    subject: `Approve or deny booking #${booking.id}`,
-    text: `
-A new booking requires review.
-
-Booking ID: ${booking.id}
-Name: ${booking.waiverPrintedName || "No name"}
-Email: ${booking.customerEmail || "No email"}
-Rental: ${booking.rentalLabel || "Boat Rental"}
-Date: ${booking.date || "Not provided"}
-Time: ${booking.rentalTime || "Not provided"}
-Tow Location: ${booking.towLocation || "None"}
-Status: ${statusLabel(booking.status || "pending_approval")}
-
-Approve:
-${approveUrl}
-
-Deny:
-${denyUrl}
-
-Admin page:
-${adminViewUrl()}
-
-Photo ID:
-${photoUrl || "Not available"}
-    `.trim(),
-    html: `
-      <h2>New booking requires review</h2>
-      <p><strong>Booking ID:</strong> ${booking.id}</p>
-      <p><strong>Name:</strong> ${escapeHtml(booking.waiverPrintedName || "No name")}</p>
-      <p><strong>Email:</strong> ${escapeHtml(booking.customerEmail || "No email")}</p>
-      <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
-      <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
-      <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
-      <p><strong>Tow Location:</strong> ${escapeHtml(booking.towLocation || "None")}</p>
-      <p><strong>Status:</strong> ${escapeHtml(statusLabel(booking.status || "pending_approval"))}</p>
-      ${
-        photoUrl
-          ? `<p><strong>Photo ID:</strong> <a href="${photoUrl}" target="_blank" rel="noopener noreferrer">View uploaded ID</a></p>`
-          : ""
-      }
-      <div style="margin-top:24px;">
-        <a href="${approveUrl}" style="display:inline-block;padding:12px 18px;background:#157347;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;margin-right:10px;">Approve Booking</a>
-        <a href="${denyUrl}" style="display:inline-block;padding:12px 18px;background:#b42318;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">Deny Booking</a>
-      </div>
-      <p style="margin-top:18px;">
-        <a href="${adminViewUrl()}" target="_blank" rel="noopener noreferrer">Open admin page</a>
-      </p>
-    `,
   })
 }
 
@@ -1255,9 +1256,6 @@ Status: ${readableStatus}
   }
 }
 
-// -----------------------------
-// ADMIN ACTION CORES
-// -----------------------------
 async function approveBookingCore(id) {
   const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
 
