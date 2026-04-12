@@ -46,6 +46,41 @@ const timeOptions = [
 const CASTAIC_INFO_URL = "https://parks.lacounty.gov/castaic-lake-state-recreation-area/"
 const PYRAMID_INFO_URL = "https://water.ca.gov/What-We-Do/Recreation/Pyramid-Lake-Recreation"
 
+const heroRentalGroups = [
+  {
+    key: "jetski-single",
+    title: "Jet Ski Rentals",
+    text: "Choose your jet ski rental option directly below this photo.",
+    image: "/images/jetski-collage-1.png",
+    alt: "Jet ski rental",
+    options: ["Jet Ski (Single)", "Jet Ski (Double)"],
+  },
+  {
+    key: "jetski-double",
+    title: "More Jet Ski Fun",
+    text: "Fast, flexible, and exciting rental options.",
+    image: "/images/jetski-collage-2.png",
+    alt: "More jet ski action",
+    options: ["Jet Ski (Single)", "Jet Ski (Double)"],
+  },
+  {
+    key: "pontoon",
+    title: "Pontoon Rentals",
+    text: "Comfortable group cruising with multiple time options.",
+    image: "/images/suntracker-pontoon.png",
+    alt: "Pontoon rental",
+    options: ["Pontoon - 6 Hours", "Pontoon - 8 Hours", "Pontoon - 10 Hours"],
+  },
+  {
+    key: "bass-boat",
+    title: "Bass Boat Rentals",
+    text: "Full-day fishing and performance boating.",
+    image: "/images/bass-boat.webp",
+    alt: "Bass boat rental",
+    options: ["Bass Boat - Full Day"],
+  },
+]
+
 function formatDate(value) {
   if (!value) return "—"
   return value
@@ -62,6 +97,10 @@ function getRentalPrice(rentalValue) {
 
 function getTowPrice(towValue) {
   return towOptions.find((item) => item.value === towValue)?.price || 0
+}
+
+function getRentalLabel(rentalValue) {
+  return rentalOptions.find((item) => item.value === rentalValue)?.label || rentalValue
 }
 
 function statusPillStyle(status) {
@@ -768,10 +807,40 @@ function AdminPage() {
   )
 }
 
+function RentalCard({ card, selectedRental, onChange }) {
+  return (
+    <article style={styles.heroCard}>
+      <img src={card.image} alt={card.alt} style={styles.heroImage} />
+      <div style={styles.heroContent}>
+        <h3 style={styles.heroTitle}>{card.title}</h3>
+        <p style={styles.heroText}>{card.text}</p>
+
+        <div style={styles.heroSelectWrap}>
+          <label style={styles.heroSelectLabel}>
+            Choose Option
+            <select
+              style={styles.heroSelect}
+              value={card.options.includes(selectedRental) ? selectedRental : card.options[0]}
+              onChange={(e) => onChange(e.target.value)}
+            >
+              {card.options.map((value) => (
+                <option key={value} value={value}>
+                  {getRentalLabel(value)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+    </article>
+  )
+}
+
 export default function App() {
   const path = window.location.pathname
   const pathParts = path.split("/")
   const depositRequestBookingId = pathParts[1] === "deposit" ? pathParts[2] : null
+  const payRequestBookingId = pathParts[1] === "pay" ? pathParts[2] : null
 
   const [rental, setRental] = useState("Pontoon - 6 Hours")
   const [date, setDate] = useState("")
@@ -1122,6 +1191,42 @@ export default function App() {
     )
   }
 
+  if (payRequestBookingId) {
+    return (
+      <div style={styles.successPage}>
+        <div style={styles.successCard}>
+          <h1 style={styles.successTitle}>Complete Your Payment</h1>
+          <p style={styles.successText}>
+            Your booking has been approved. Click below to open secure checkout.
+          </p>
+
+          <button
+            style={styles.primaryButton}
+            onClick={async () => {
+              try {
+                const res = await fetch(`${API}/api/create-checkout/${payRequestBookingId}`, {
+                  method: "POST",
+                })
+                const data = await res.json().catch(() => ({}))
+
+                if (res.ok && data.url) {
+                  window.location.href = data.url
+                } else {
+                  alert(data.error || "Could not create checkout session.")
+                }
+              } catch (error) {
+                console.error(error)
+                alert("Server error while creating checkout.")
+              }
+            }}
+          >
+            Pay Rental Now
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (path === "/success") {
     return (
       <div style={styles.successPage}>
@@ -1247,45 +1352,18 @@ export default function App() {
       </section>
 
       <section style={styles.heroGrid}>
-        <article style={styles.heroCard}>
-          <img src="/images/jetski-collage-1.png" alt="Jet ski rental" style={styles.heroImage} />
-          <div style={styles.heroContent}>
-            <h3 style={styles.heroTitle}>Jet Ski Rentals</h3>
-            <p style={styles.heroText}>Single or double jet ski options for fun lake days.</p>
-          </div>
-        </article>
-
-        <article style={styles.heroCard}>
-          <img
-            src="/images/jetski-collage-2.png"
-            alt="More jet ski action"
-            style={styles.heroImage}
+        {heroRentalGroups.map((card) => (
+          <RentalCard
+            key={card.key}
+            card={card}
+            selectedRental={rental}
+            onChange={(value) => {
+              setRental(value)
+              setAvailabilityMessage("")
+              setStatusMessage("")
+            }}
           />
-          <div style={styles.heroContent}>
-            <h3 style={styles.heroTitle}>More Jet Ski Fun</h3>
-            <p style={styles.heroText}>Fast, flexible, and exciting rental options.</p>
-          </div>
-        </article>
-
-        <article style={styles.heroCard}>
-          <img
-            src="/images/suntracker-pontoon.png"
-            alt="Pontoon rental"
-            style={styles.heroImage}
-          />
-          <div style={styles.heroContent}>
-            <h3 style={styles.heroTitle}>Pontoon Rentals</h3>
-            <p style={styles.heroText}>Comfortable group cruising with multiple time options.</p>
-          </div>
-        </article>
-
-        <article style={styles.heroCard}>
-          <img src="/images/bass-boat.webp" alt="Bass boat rental" style={styles.heroImage} />
-          <div style={styles.heroContent}>
-            <h3 style={styles.heroTitle}>Bass Boat Rentals</h3>
-            <p style={styles.heroText}>Full-day fishing and performance boating.</p>
-          </div>
-        </article>
+        ))}
       </section>
 
       <section style={styles.mainCard}>
@@ -1297,25 +1375,15 @@ export default function App() {
 
           <div style={styles.formHeaderActions}>
             <div style={styles.badge}>{bookingId ? `Booking #${bookingId}` : "New Booking"}</div>
-
-            <button type="button" onClick={resetBookingForm} style={styles.secondaryButton}>
-              New Booking
-            </button>
           </div>
         </div>
 
-        <div style={styles.formGrid}>
-          <label style={styles.label}>
-            Rental Type
-            <select style={styles.input} value={rental} onChange={(e) => setRental(e.target.value)}>
-              {rentalOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div style={styles.selectedRentalBar}>
+          <span style={styles.selectedRentalLabel}>Selected Rental</span>
+          <strong style={styles.selectedRentalValue}>{getRentalLabel(rental)}</strong>
+        </div>
 
+        <div style={styles.formGrid}>
           <label style={styles.label}>
             Rental Date
             <input
@@ -1450,6 +1518,10 @@ export default function App() {
             disabled={!bookingId}
           >
             Refresh Approval Status
+          </button>
+
+          <button type="button" style={styles.secondaryButton} onClick={resetBookingForm}>
+            Clear Form
           </button>
         </div>
 
@@ -1682,6 +1754,8 @@ const styles = {
     overflow: "hidden",
     boxShadow: "0 10px 28px rgba(14, 34, 53, 0.12)",
     border: "1px solid rgba(15, 23, 32, 0.06)",
+    display: "flex",
+    flexDirection: "column",
   },
   heroImage: {
     width: "100%",
@@ -1691,6 +1765,11 @@ const styles = {
   },
   heroContent: {
     padding: "16px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+    flex: 1,
+    justifyContent: "space-between",
   },
   heroTitle: {
     margin: "0 0 8px 0",
@@ -1703,6 +1782,29 @@ const styles = {
     color: "#5b6b79",
     lineHeight: 1.5,
     fontSize: "14px",
+  },
+  heroSelectWrap: {
+    marginTop: "auto",
+    paddingTop: "4px",
+  },
+  heroSelectLabel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    fontSize: "13px",
+    fontWeight: 800,
+    color: "#203445",
+  },
+  heroSelect: {
+    width: "100%",
+    padding: "12px 14px",
+    borderRadius: "12px",
+    border: "1px solid #d5dee7",
+    background: "#fbfdff",
+    fontSize: "14px",
+    color: "#102030",
+    outline: "none",
+    boxSizing: "border-box",
   },
   mainCard: {
     maxWidth: "1200px",
@@ -1746,6 +1848,29 @@ const styles = {
     fontSize: "14px",
     fontWeight: 700,
     whiteSpace: "nowrap",
+  },
+  selectedRentalBar: {
+    marginBottom: "18px",
+    background: "#f7fafc",
+    border: "1px solid #e1e8ef",
+    borderRadius: "16px",
+    padding: "14px 16px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    flexWrap: "wrap",
+  },
+  selectedRentalLabel: {
+    fontSize: "13px",
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: "0.7px",
+    color: "#6b7d8b",
+  },
+  selectedRentalValue: {
+    fontSize: "16px",
+    color: "#0f2233",
   },
   formGrid: {
     display: "grid",

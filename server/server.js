@@ -95,6 +95,10 @@ function formatDepositRequestUrl(bookingId) {
   return `${SITE_URL}/deposit/${bookingId}`
 }
 
+function formatPaymentUrl(bookingId) {
+  return `${SITE_URL}/pay/${bookingId}`
+}
+
 function adminApproveUrl(bookingId) {
   return `${API_URL}/api/admin/approve/${bookingId}?token=${encodeURIComponent(ADMIN_ACTION_TOKEN)}`
 }
@@ -303,10 +307,6 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
             db.get(`SELECT * FROM bookings WHERE id = ?`, [bookingId], async (_lookupErr, booking) => {
               if (!booking) return
 
-              const safeRental = escapeHtml(booking.rentalLabel || "Boat Rental")
-              const safeDate = escapeHtml(booking.date || "Not provided")
-              const safeTime = escapeHtml(booking.rentalTime || "Not provided")
-
               try {
                 if (booking.customerEmail) {
                   await sendEmail({
@@ -324,9 +324,9 @@ Status: ${booking.status || "confirmed"}
                     html: `
                       <h2>Payment received</h2>
                       <p><strong>Booking ID:</strong> ${booking.id}</p>
-                      <p><strong>Rental:</strong> ${safeRental}</p>
-                      <p><strong>Date:</strong> ${safeDate}</p>
-                      <p><strong>Time:</strong> ${safeTime}</p>
+                      <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
+                      <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
+                      <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
                       <p><strong>Status:</strong> ${escapeHtml(booking.status || "confirmed")}</p>
                     `,
                   })
@@ -350,9 +350,9 @@ Time: ${booking.rentalTime || "Not provided"}
                     <p><strong>Booking ID:</strong> ${booking.id}</p>
                     <p><strong>Name:</strong> ${escapeHtml(booking.waiverPrintedName || "No name")}</p>
                     <p><strong>Email:</strong> ${escapeHtml(booking.customerEmail || "No email")}</p>
-                    <p><strong>Rental:</strong> ${safeRental}</p>
-                    <p><strong>Date:</strong> ${safeDate}</p>
-                    <p><strong>Time:</strong> ${safeTime}</p>
+                    <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
+                    <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
+                    <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
                   `,
                 })
               } catch (emailErr) {
@@ -396,7 +396,6 @@ Time: ${booking.rentalTime || "Not provided"}
 
             db.get(`SELECT * FROM bookings WHERE id = ?`, [bookingId], async (_e, booking) => {
               if (!booking) return
-
               try {
                 if (booking.customerEmail) {
                   await sendEmail({
@@ -648,6 +647,8 @@ app.get("/api/availability", async (req, res) => {
   }
 
   try {
+    const boatType = rentalBoatType(rentalLabel)
+
     const blockedRow = await getAsync(
       `
       SELECT COUNT(*) AS count
@@ -661,11 +662,37 @@ app.get("/api/availability", async (req, res) => {
           OR boatType = 'All Rentals'
         )
       `,
-      [date, rentalLabel, rentalBoatType(rentalLabel)]
+      [date, rentalLabel, boatType]
     )
 
     if ((blockedRow?.count || 0) > 0) {
       return res.json({ available: false })
+    }
+
+    if (boatType === "Jet Ski") {
+      const rows = await allAsync(
+        `
+        SELECT rentalLabel
+        FROM bookings
+        WHERE date = ?
+          AND boatType = 'Jet Ski'
+          AND status IN ('pending_approval', 'approved_unpaid', 'pending_payment', 'confirmed')
+        `,
+        [date]
+      )
+
+      const singleCount = rows.filter((r) => r.rentalLabel === "Jet Ski (Single)").length
+      const hasDouble = rows.some((r) => r.rentalLabel === "Jet Ski (Double)")
+
+      let available = true
+
+      if (rentalLabel === "Jet Ski (Double)") {
+        available = !hasDouble && singleCount === 0
+      } else if (rentalLabel === "Jet Ski (Single)") {
+        available = !hasDouble && singleCount < 2
+      }
+
+      return res.json({ available })
     }
 
     const bookingRow = await getAsync(
@@ -674,7 +701,7 @@ app.get("/api/availability", async (req, res) => {
       FROM bookings
       WHERE date = ?
         AND rentalLabel = ?
-        AND status IN ('approved_unpaid', 'pending_payment', 'confirmed', 'pending_approval')
+        AND status IN ('pending_approval', 'approved_unpaid', 'pending_payment', 'confirmed')
       `,
       [date, rentalLabel]
     )
@@ -758,6 +785,174 @@ app.post("/api/bookings/waiver", upload.single("photoId"), (req, res) => {
   const createdAt = new Date().toISOString()
   const normalizedCustomerEmail = normalizeEmail(customerEmail)
 
+  function insertBooking() {
+    db.run(
+      `
+      INSERT INTO bookings (
+        userId,
+        rentalLabel,
+        boatType,
+        date,
+        rentalTime,
+        towLocation,
+        towFee,
+        waiverPrintedName,
+        waiverAccepted,
+        waiverStatus,
+        paymentStatus,
+        status,
+        customerEmail,
+        photoIdPath,
+        createdAt,
+        depositStatus
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        "1",
+        rentalLabel,
+        boatType,
+        date,
+        rentalTime || "",
+        towLocation || "None",
+        towFee,
+        waiverPrintedName,
+        accepted,
+        accepted ? "signed" : "not_started",
+        "unpaid",
+        "pending_approval",
+        normalizedCustomerEmail || "",
+        req.file ? `./uploads/${req.file.filename}` : null,
+        createdAt,
+        "not_scheduled",
+      ],
+      function (err) {
+        if (err) {
+          console.error("CREATE BOOKING ERROR:", err)
+          return res.status(500).json({ error: "Could not create booking." })
+        }
+
+        const bookingId = this.lastID
+        const depositUrl = formatDepositRequestUrl(bookingId)
+
+        const bookingForEmail = {
+          id: bookingId,
+          rentalLabel,
+          date,
+          rentalTime: rentalTime || "",
+          towLocation: towLocation || "None",
+          customerEmail: normalizedCustomerEmail || "",
+          waiverPrintedName,
+          photoIdPath: req.file ? `./uploads/${req.file.filename}` : null,
+          status: "pending_approval",
+        }
+
+        sendAdminApprovalEmail(bookingForEmail).catch((emailErr) => {
+          console.error("ADMIN APPROVAL EMAIL ERROR:", emailErr)
+        })
+
+        Promise.allSettled([
+          sendEmail({
+            to: ADMIN_NOTIFICATION_EMAIL,
+            subject: `New booking request #${bookingId}`,
+            text: `
+New booking request received.
+
+Booking ID: ${bookingId}
+Name: ${waiverPrintedName}
+Email: ${normalizedCustomerEmail || "No email provided"}
+Rental: ${rentalLabel}
+Date: ${date}
+Time: ${rentalTime || "Not provided"}
+Tow Location: ${towLocation || "None"}
+Photo ID Path: /uploads/${req.file.filename}
+            `.trim(),
+            html: `
+              <h2>New booking request received</h2>
+              <p><strong>Booking ID:</strong> ${bookingId}</p>
+              <p><strong>Name:</strong> ${escapeHtml(waiverPrintedName)}</p>
+              <p><strong>Email:</strong> ${escapeHtml(normalizedCustomerEmail || "No email provided")}</p>
+              <p><strong>Rental:</strong> ${escapeHtml(rentalLabel)}</p>
+              <p><strong>Date:</strong> ${escapeHtml(date)}</p>
+              <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
+              <p><strong>Tow Location:</strong> ${escapeHtml(towLocation || "None")}</p>
+              <p><strong>Photo ID Path:</strong> /uploads/${escapeHtml(req.file.filename)}</p>
+            `,
+          }),
+          normalizedCustomerEmail
+            ? sendEmail({
+                to: normalizedCustomerEmail,
+                subject: `Cleared to Cruise booking request #${bookingId} received`,
+                text: `
+Your booking request has been received.
+
+Booking ID: ${bookingId}
+Rental: ${rentalLabel}
+Date: ${date}
+Time: ${rentalTime || "Not provided"}
+Tow Location: ${towLocation || "None"}
+
+You can check your status later with:
+Booking ID: ${bookingId}
+Email: ${normalizedCustomerEmail}
+
+Deposit link:
+${depositUrl}
+                `.trim(),
+                html: `
+                  <h2>Your booking request has been received</h2>
+                  <p><strong>Booking ID:</strong> ${bookingId}</p>
+                  <p><strong>Rental:</strong> ${escapeHtml(rentalLabel)}</p>
+                  <p><strong>Date:</strong> ${escapeHtml(date)}</p>
+                  <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
+                  <p><strong>Tow Location:</strong> ${escapeHtml(towLocation || "None")}</p>
+                  <p>You can check your status later using your booking ID and email.</p>
+                  <p><strong>Deposit Link:</strong> <a href="${depositUrl}">${depositUrl}</a></p>
+                `,
+              })
+            : Promise.resolve(),
+        ]).then((results) => {
+          results.forEach((result, index) => {
+            if (result.status === "rejected") {
+              console.error(
+                index === 0 ? "ADMIN BOOKING EMAIL ERROR:" : "CUSTOMER BOOKING EMAIL ERROR:",
+                result.reason
+              )
+            }
+          })
+        })
+
+        if (normalizedCustomerEmail && isWithinNextThreeDays(date)) {
+          Promise.allSettled([
+            sendEmail({
+              to: normalizedCustomerEmail,
+              subject: `Security deposit authorization requested for booking #${bookingId}`,
+              text: `
+Please authorize your $500 security deposit card for booking #${bookingId}.
+
+Deposit link:
+${depositUrl}
+              `.trim(),
+              html: `
+                <h2>Security deposit authorization requested</h2>
+                <p>Please authorize your $500 security deposit card for booking #${bookingId}.</p>
+                <p><a href="${depositUrl}">Authorize Deposit</a></p>
+              `,
+            }),
+            runAsync(
+              `UPDATE bookings SET depositLinkSentAt = datetime('now'), depositStatus = 'requested' WHERE id = ?`,
+              [bookingId]
+            ),
+          ]).catch((depositErr) => {
+            console.error("IMMEDIATE DEPOSIT REQUEST ERROR:", depositErr)
+          })
+        }
+
+        return res.json({ success: true, bookingId })
+      }
+    )
+  }
+
   db.get(
     `
     SELECT COUNT(*) AS count
@@ -782,197 +977,68 @@ app.post("/api/bookings/waiver", upload.single("photoId"), (req, res) => {
         return res.status(409).json({ error: "That rental is blocked for the selected date." })
       }
 
-      db.get(
-        `
-        SELECT COUNT(*) AS count
-        FROM bookings
-        WHERE date = ?
-          AND rentalLabel = ?
-          AND status IN ('approved_unpaid', 'pending_payment', 'confirmed', 'pending_approval')
-        `,
-        [date, rentalLabel],
-        (existingErr, existingRow) => {
-          if (existingErr) {
-            console.error("CREATE BOOKING DUPLICATE CHECK ERROR:", existingErr)
-            return res.status(500).json({ error: "Could not verify existing bookings." })
-          }
-
-          if ((existingRow?.count || 0) > 0) {
-            return res
-              .status(409)
-              .json({ error: "That rental is already booked or pending for the selected date." })
-          }
-
-          db.run(
-            `
-            INSERT INTO bookings (
-              userId,
-              rentalLabel,
-              boatType,
-              date,
-              rentalTime,
-              towLocation,
-              towFee,
-              waiverPrintedName,
-              waiverAccepted,
-              waiverStatus,
-              paymentStatus,
-              status,
-              customerEmail,
-              photoIdPath,
-              createdAt,
-              depositStatus
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `,
-            [
-              "1",
-              rentalLabel,
-              boatType,
-              date,
-              rentalTime || "",
-              towLocation || "None",
-              towFee,
-              waiverPrintedName,
-              accepted,
-              accepted ? "signed" : "not_started",
-              "unpaid",
-              "pending_approval",
-              normalizedCustomerEmail || "",
-              req.file ? `./uploads/${req.file.filename}` : null,
-              createdAt,
-              "not_scheduled",
-            ],
-            function (err) {
-              if (err) {
-                console.error("CREATE BOOKING ERROR:", err)
-                return res.status(500).json({ error: "Could not create booking." })
-              }
-
-              const bookingId = this.lastID
-              const depositUrl = formatDepositRequestUrl(bookingId)
-
-              const bookingForEmail = {
-                id: bookingId,
-                rentalLabel,
-                date,
-                rentalTime: rentalTime || "",
-                towLocation: towLocation || "None",
-                customerEmail: normalizedCustomerEmail || "",
-                waiverPrintedName,
-                photoIdPath: req.file ? `./uploads/${req.file.filename}` : null,
-                status: "pending_approval",
-              }
-
-              sendAdminApprovalEmail(bookingForEmail).catch((emailErr) => {
-                console.error("ADMIN APPROVAL EMAIL ERROR:", emailErr)
-              })
-
-              Promise.allSettled([
-                sendEmail({
-                  to: ADMIN_NOTIFICATION_EMAIL,
-                  subject: `New booking request #${bookingId}`,
-                  text: `
-New booking request received.
-
-Booking ID: ${bookingId}
-Name: ${waiverPrintedName}
-Email: ${normalizedCustomerEmail || "No email provided"}
-Rental: ${rentalLabel}
-Date: ${date}
-Time: ${rentalTime || "Not provided"}
-Tow Location: ${towLocation || "None"}
-Photo ID Path: /uploads/${req.file.filename}
-                  `.trim(),
-                  html: `
-                    <h2>New booking request received</h2>
-                    <p><strong>Booking ID:</strong> ${bookingId}</p>
-                    <p><strong>Name:</strong> ${escapeHtml(waiverPrintedName)}</p>
-                    <p><strong>Email:</strong> ${escapeHtml(normalizedCustomerEmail || "No email provided")}</p>
-                    <p><strong>Rental:</strong> ${escapeHtml(rentalLabel)}</p>
-                    <p><strong>Date:</strong> ${escapeHtml(date)}</p>
-                    <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
-                    <p><strong>Tow Location:</strong> ${escapeHtml(towLocation || "None")}</p>
-                    <p><strong>Photo ID Path:</strong> /uploads/${escapeHtml(req.file.filename)}</p>
-                  `,
-                }),
-                normalizedCustomerEmail
-                  ? sendEmail({
-                      to: normalizedCustomerEmail,
-                      subject: `Cleared to Cruise booking request #${bookingId} received`,
-                      text: `
-Your booking request has been received.
-
-Booking ID: ${bookingId}
-Rental: ${rentalLabel}
-Date: ${date}
-Time: ${rentalTime || "Not provided"}
-Tow Location: ${towLocation || "None"}
-
-You can check your status later with:
-Booking ID: ${bookingId}
-Email: ${normalizedCustomerEmail}
-
-If your rental date is within 3 days, the deposit authorization link may be sent immediately.
-Deposit link:
-${depositUrl}
-                      `.trim(),
-                      html: `
-                        <h2>Your booking request has been received</h2>
-                        <p><strong>Booking ID:</strong> ${bookingId}</p>
-                        <p><strong>Rental:</strong> ${escapeHtml(rentalLabel)}</p>
-                        <p><strong>Date:</strong> ${escapeHtml(date)}</p>
-                        <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
-                        <p><strong>Tow Location:</strong> ${escapeHtml(towLocation || "None")}</p>
-                        <p>You can check your status later using your booking ID and email.</p>
-                        <p><strong>Booking ID:</strong> ${bookingId}</p>
-                        <p><strong>Email:</strong> ${escapeHtml(normalizedCustomerEmail)}</p>
-                        <p><strong>Deposit Link:</strong> <a href="${depositUrl}">${depositUrl}</a></p>
-                      `,
-                    })
-                  : Promise.resolve(),
-              ]).then((results) => {
-                results.forEach((result, index) => {
-                  if (result.status === "rejected") {
-                    console.error(
-                      index === 0 ? "ADMIN BOOKING EMAIL ERROR:" : "CUSTOMER BOOKING EMAIL ERROR:",
-                      result.reason
-                    )
-                  }
-                })
-              })
-
-              if (normalizedCustomerEmail && isWithinNextThreeDays(date)) {
-                Promise.allSettled([
-                  sendEmail({
-                    to: normalizedCustomerEmail,
-                    subject: `Security deposit authorization requested for booking #${bookingId}`,
-                    text: `
-Please authorize your $500 security deposit card for booking #${bookingId}.
-
-Deposit link:
-${depositUrl}
-                    `.trim(),
-                    html: `
-                      <h2>Security deposit authorization requested</h2>
-                      <p>Please authorize your $500 security deposit card for booking #${bookingId}.</p>
-                      <p><a href="${depositUrl}">Authorize Deposit</a></p>
-                    `,
-                  }),
-                  runAsync(
-                    `UPDATE bookings SET depositLinkSentAt = datetime('now'), depositStatus = 'requested' WHERE id = ?`,
-                    [bookingId]
-                  ),
-                ]).catch((depositErr) => {
-                  console.error("IMMEDIATE DEPOSIT REQUEST ERROR:", depositErr)
-                })
-              }
-
-              return res.json({ success: true, bookingId })
+      if (boatType === "Jet Ski") {
+        db.all(
+          `
+          SELECT rentalLabel
+          FROM bookings
+          WHERE date = ?
+            AND boatType = 'Jet Ski'
+            AND status IN ('pending_approval', 'approved_unpaid', 'pending_payment', 'confirmed')
+          `,
+          [date],
+          (existingErr, rows) => {
+            if (existingErr) {
+              console.error("CREATE BOOKING JET SKI CHECK ERROR:", existingErr)
+              return res.status(500).json({ error: "Could not verify existing bookings." })
             }
-          )
-        }
-      )
+
+            const singleCount = rows.filter((r) => r.rentalLabel === "Jet Ski (Single)").length
+            const hasDouble = rows.some((r) => r.rentalLabel === "Jet Ski (Double)")
+
+            let available = true
+
+            if (rentalLabel === "Jet Ski (Double)") {
+              available = !hasDouble && singleCount === 0
+            } else if (rentalLabel === "Jet Ski (Single)") {
+              available = !hasDouble && singleCount < 2
+            }
+
+            if (!available) {
+              return res
+                .status(409)
+                .json({ error: "That jet ski option is no longer available for the selected date." })
+            }
+
+            insertBooking()
+          }
+        )
+      } else {
+        db.get(
+          `
+          SELECT COUNT(*) AS count
+          FROM bookings
+          WHERE date = ?
+            AND rentalLabel = ?
+            AND status IN ('pending_approval', 'approved_unpaid', 'pending_payment', 'confirmed')
+          `,
+          [date, rentalLabel],
+          (existingErr, existingRow) => {
+            if (existingErr) {
+              console.error("CREATE BOOKING DUPLICATE CHECK ERROR:", existingErr)
+              return res.status(500).json({ error: "Could not verify existing bookings." })
+            }
+
+            if ((existingRow?.count || 0) > 0) {
+              return res
+                .status(409)
+                .json({ error: "That rental is already booked or pending for the selected date." })
+            }
+
+            insertBooking()
+          }
+        )
+      }
     }
   )
 })
@@ -1198,15 +1264,7 @@ app.get("/api/admin/blocked-dates", async (_req, res) => {
 // -----------------------------
 async function sendStatusEmails(booking, newStatus) {
   const readableStatus = statusLabel(newStatus)
-  const payLinkText =
-    newStatus === "approved_unpaid"
-      ? `\nPay from the website: ${SITE_URL}\n`
-      : ""
-
-  const payLinkHtml =
-    newStatus === "approved_unpaid"
-      ? `<p>You can now return to the website to complete payment: <a href="${SITE_URL}">${SITE_URL}</a></p>`
-      : ""
+  const paymentUrl = formatPaymentUrl(booking.id)
 
   try {
     if (booking.customerEmail) {
@@ -1219,7 +1277,13 @@ Your booking status has been updated.
 Booking ID: ${booking.id}
 Rental: ${booking.rentalLabel || "Boat Rental"}
 Date: ${booking.date || "Not provided"}
-Status: ${readableStatus}${payLinkText}
+Status: ${readableStatus}
+
+${
+  newStatus === "approved_unpaid"
+    ? `Your booking has been approved. Pay here:\n${paymentUrl}`
+    : ""
+}
         `.trim(),
         html: `
           <h2>Booking status updated</h2>
@@ -1227,7 +1291,11 @@ Status: ${readableStatus}${payLinkText}
           <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
           <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
           <p><strong>Status:</strong> ${escapeHtml(readableStatus)}</p>
-          ${payLinkHtml}
+          ${
+            newStatus === "approved_unpaid"
+              ? `<p><a href="${paymentUrl}" style="display:inline-block;padding:12px 18px;background:#0f2233;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">Pay Rental Now</a></p>`
+              : ""
+          }
         `,
       })
     }
