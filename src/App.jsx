@@ -50,18 +50,18 @@ const heroRentalGroups = [
   {
     key: "jetski-single",
     title: "Jet Ski Rentals",
-    text: "Choose your jet ski rental option directly below this photo.",
+    text: "Single jet ski rental option.",
     image: "/images/jetski-collage-1.png",
     alt: "Jet ski rental",
-    options: ["Jet Ski (Single)", "Jet Ski (Double)"],
+    options: ["Jet Ski (Single)"],
   },
   {
     key: "jetski-double",
     title: "More Jet Ski Fun",
-    text: "Fast, flexible, and exciting rental options.",
+    text: "Double jet ski rental option.",
     image: "/images/jetski-collage-2.png",
     alt: "More jet ski action",
-    options: ["Jet Ski (Single)", "Jet Ski (Double)"],
+    options: ["Jet Ski (Double)"],
   },
   {
     key: "pontoon",
@@ -808,28 +808,60 @@ function AdminPage() {
 }
 
 function RentalCard({ card, selectedRental, onChange }) {
+  const isSelectedGroup = card.options.includes(selectedRental)
+  const currentValue = isSelectedGroup ? selectedRental : card.options[0]
+
   return (
-    <article style={styles.heroCard}>
+    <article
+      style={{
+        ...styles.heroCard,
+        ...(isSelectedGroup ? styles.heroCardSelected : {}),
+      }}
+    >
       <img src={card.image} alt={card.alt} style={styles.heroImage} />
       <div style={styles.heroContent}>
-        <h3 style={styles.heroTitle}>{card.title}</h3>
-        <p style={styles.heroText}>{card.text}</p>
+        <div>
+          <h3 style={styles.heroTitle}>{card.title}</h3>
+          <p style={styles.heroText}>{card.text}</p>
+        </div>
 
         <div style={styles.heroSelectWrap}>
-          <label style={styles.heroSelectLabel}>
-            Choose Option
-            <select
-              style={styles.heroSelect}
-              value={card.options.includes(selectedRental) ? selectedRental : card.options[0]}
-              onChange={(e) => onChange(e.target.value)}
+          {card.options.length === 1 ? (
+            <button
+              type="button"
+              style={isSelectedGroup ? styles.heroSelectedButton : styles.heroChooseButton}
+              onClick={() => onChange(card.options[0])}
             >
-              {card.options.map((value) => (
-                <option key={value} value={value}>
-                  {getRentalLabel(value)}
-                </option>
-              ))}
-            </select>
-          </label>
+              {isSelectedGroup
+                ? `Selected: ${getRentalLabel(card.options[0])}`
+                : `Choose ${getRentalLabel(card.options[0])}`}
+            </button>
+          ) : (
+            <div style={styles.heroDropdownActionWrap}>
+              <label style={styles.heroSelectLabel}>
+                Choose Option
+                <select
+                  style={styles.heroSelect}
+                  value={currentValue}
+                  onChange={(e) => onChange(e.target.value)}
+                >
+                  {card.options.map((value) => (
+                    <option key={value} value={value}>
+                      {getRentalLabel(value)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="button"
+                style={isSelectedGroup ? styles.heroSelectedButton : styles.heroChooseButton}
+                onClick={() => onChange(currentValue)}
+              >
+                {isSelectedGroup ? "Selected" : "Use This Option"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </article>
@@ -1465,7 +1497,7 @@ export default function App() {
             <span>Rental</span>
             <strong>${rentalPrice}</strong>
           </div>
-          <div style={styles.priceRow}>
+           <div style={styles.priceRow}>
             <span>Tow Fee</span>
             <strong>${towPrice}</strong>
           </div>
@@ -1756,6 +1788,12 @@ const styles = {
     border: "1px solid rgba(15, 23, 32, 0.06)",
     display: "flex",
     flexDirection: "column",
+    transition: "transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease",
+  },
+  heroCardSelected: {
+    border: "2px solid #0f2233",
+    boxShadow: "0 16px 36px rgba(15, 34, 51, 0.18)",
+    transform: "translateY(-2px)",
   },
   heroImage: {
     width: "100%",
@@ -1795,7 +1833,7 @@ const styles = {
     fontWeight: 800,
     color: "#203445",
   },
-    heroSelect: {
+  heroSelect: {
     width: "100%",
     padding: "12px 14px",
     borderRadius: "12px",
@@ -1805,6 +1843,10 @@ const styles = {
     color: "#102030",
     outline: "none",
     boxSizing: "border-box",
+  },
+  heroDropdownActionWrap: {
+    display: "grid",
+    gap: "10px",
   },
   heroChooseButton: {
     width: "100%",
@@ -1817,7 +1859,6 @@ const styles = {
     fontWeight: 800,
     cursor: "pointer",
   },
-
   heroSelectedButton: {
     width: "100%",
     border: "none",
