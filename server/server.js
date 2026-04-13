@@ -169,9 +169,21 @@ function getBasicAuthCredentials(req) {
 }
 
 function requireAdminLogin(req, res, next) {
-  if (!ADMIN_PASSWORD) {
-    return res.status(500).json({ error: "ADMIN_PASSWORD is not configured on the server." })
+  const authHeader = String(req.headers.authorization || "")
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7).trim()
+    : ""
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" })
   }
+
+  if (token !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: "Unauthorized" })
+  }
+
+  next()
+}
 
   const credentials = getBasicAuthCredentials(req)
 
