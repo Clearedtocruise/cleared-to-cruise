@@ -121,28 +121,25 @@ function setStoredAdminToken(token) {
 
 async function adminFetch(path, options = {}) {
   const token = localStorage.getItem("ctc_admin_token") || ""
-  const user = localStorage.getItem("ctc_admin_user") || "admin"
-
-  if (!token) {
-    throw new Error("ADMIN_AUTH_REQUIRED")
-  }
 
   const headers = {
     ...(options.headers || {}),
-    Authorization: "Basic " + btoa(`${user}:${token}`),
   }
 
-  const res = await fetch(`${API}${path}`, {
+  if (token) {
+    headers.Authorization = `Basic ${token}`
+  }
+
+  const response = await fetch(`${API}${path}`, {
     ...options,
     headers,
   })
 
-  if (res.status === 401 || res.status === 403) {
-    localStorage.removeItem("ctc_admin_token")
+  if (response.status === 401 || response.status === 403) {
     throw new Error("ADMIN_AUTH_REQUIRED")
   }
 
-  return res
+  return response
 }
 
 function statusPillStyle(status) {
