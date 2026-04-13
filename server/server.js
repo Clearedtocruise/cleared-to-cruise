@@ -156,19 +156,31 @@ function requireAdminLogin(req, res, next) {
   }
 
   const authHeader = String(req.headers.authorization || "")
-  const token = authHeader.startsWith("Bearer ")
-    ? authHeader.slice(7).trim()
-    : ""
 
-  if (!token) {
+  if (!authHeader.startsWith("Basic ")) {
     return res.status(401).json({ error: "Unauthorized" })
   }
 
-  if (token !== ADMIN_PASSWORD) {
+  try {
+    const encoded = authHeader.slice(6).trim()
+    const decoded = Buffer.from(encoded, "base64").toString("utf8")
+    const separatorIndex = decoded.indexOf(":")
+
+    if (separatorIndex === -1) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const username = decoded.slice(0, separatorIndex).trim()
+    const password = decoded.slice(separatorIndex + 1).trim()
+
+    if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    next()
+  } catch (err) {
     return res.status(401).json({ error: "Unauthorized" })
   }
-
-  next()
 }
 
 // -----------------------------
