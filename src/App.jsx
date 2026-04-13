@@ -120,26 +120,29 @@ function setStoredAdminToken(token) {
 }
 
 async function adminFetch(path, options = {}) {
-  const token = getStoredAdminToken()
+  const token = localStorage.getItem("ctc_admin_token") || ""
+  const user = localStorage.getItem("ctc_admin_user") || "admin"
+
+  if (!token) {
+    throw new Error("ADMIN_AUTH_REQUIRED")
+  }
 
   const headers = {
     ...(options.headers || {}),
+    Authorization: "Basic " + btoa(`${user}:${token}`),
   }
 
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
-  }
-
-  const response = await fetch(`${API}${path}`, {
+  const res = await fetch(`${API}${path}`, {
     ...options,
     headers,
   })
 
-  if (response.status === 401 || response.status === 403) {
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem("ctc_admin_token")
     throw new Error("ADMIN_AUTH_REQUIRED")
   }
 
-  return response
+  return res
 }
 
 function statusPillStyle(status) {
@@ -450,97 +453,43 @@ function BookingLookupCard({ onLoadBooking }) {
   )
 }
 
-function AdminLoginCard({ onLoginSuccess }) {
-  const [username, setUsername] = useState("")
-  const [password, setPassword] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+async function handleAdminLogin(e) {
+  e.preventDefault()
+  setError("")
 
-  async function handleAdminLogin(e) {
-    e.preventDefault()
-    setError("")
+  if (!username.trim() || !password.trim()) {
+    setError("Enter your admin username and password.")
+    return
+  }
 
-    if (!username.trim() || !password.trim()) {
-      setError("Enter your admin username and password.")
+  setLoading(true)
+
+  try {
+    // ✅ SAVE PASSWORD AS TOKEN
+   const encoded = btoa(`${username.trim()}:${password.trim()}`)
+localStorage.setItem("ctc_admin_token", encoded)
+
+    // ✅ TEST AUTH RIGHT AWAY
+    const res = await fetch(`${API}/api/admin/bookings`, {
+      headers: {
+        Authorization:
+          "Basic " + btoa(`${username.trim()}:${password.trim()}`),
+      },
+    })
+
+    if (!res.ok) {
+      localStorage.removeItem("ctc_admin_token")
+      setError("Invalid admin credentials")
       return
     }
 
-    setLoading(true)
-
-    try {
-      const res = await fetch(`${API}/api/admin/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          username: username.trim(),
-          password: password.trim(),
-        }),
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok || !data.token) {
-        setError(data.error || "Login failed.")
-        return
-      }
-
-      setStoredAdminToken(data.token)
-      setPassword("")
-      onLoginSuccess()
-    } catch (err) {
-      console.error(err)
-      setError("Server error during admin login.")
-    } finally {
-      setLoading(false)
-    }
+    onLoginSuccess()
+  } catch (err) {
+    console.error(err)
+    setError("Server error during admin login.")
+  } finally {
+    setLoading(false)
   }
-
-  return (
-    <div style={styles.adminLoginWrap}>
-      <div style={styles.adminLoginCard}>
-        <h2 style={styles.adminLoginTitle}>Admin Login</h2>
-        <p style={styles.adminLoginText}>
-          Enter your admin username and password to access the Cleared to Cruise admin panel.
-        </p>
-
-        <form onSubmit={handleAdminLogin} style={styles.adminLoginForm}>
-          <label style={styles.label}>
-            Username
-            <input
-              style={styles.input}
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Admin username"
-            />
-          </label>
-
-          <label style={styles.label}>
-            Password
-            <input
-              style={styles.input}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Admin password"
-            />
-          </label>
-
-          <button
-            type="submit"
-            style={loading ? styles.buttonDisabled : styles.primaryButton}
-            disabled={loading}
-          >
-            {loading ? "Logging In..." : "Log In"}
-          </button>
-        </form>
-
-        {error ? <div style={styles.errorBox}>{error}</div> : null}
-      </div>
-    </div>
-  )
 }
 
 function AdminPage() {
@@ -2597,7 +2546,74 @@ function MainApp() {
     </div>
   )
 }
+function AdminLoginCard({ onLoginSuccess }) {
+  const [username, setUsername] = useState("")
+  const [password, setPassword] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
 
+  async function handleAdminLogin(e) {
+    e.preventDefault()
+    setError("")
+
+    if (!username.trim() || !password.trim()) {
+      setError("Enter your admin username and password.")
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      localStorage.setItem("ctc_admin_token", password.trim())
+      localStorage.setItem("ctc_admin_user", username.trim())
+
+      const res = await fetch(`${API}/api/admin/bookings`, {
+        headers: {
+          Authorization:
+            "Basic " + btoa(`${username.trim()}:${password.trim()}`),
+        },
+      })
+
+      if (!res.ok) {
+        localStorage.removeItem("ctc_admin_token")
+        setError("Invalid admin credentials")
+        return
+      }
+
+      onLoginSuccess()
+    } catch (err) {
+      console.error(err)
+      setError("Server error during admin login.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleAdminLogin}>
+      <h2>Admin Login</h2>
+
+      <input
+        placeholder="Username"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+      />
+
+      <input
+        type="password"
+        placeholder="Password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+
+      <button type="submit" disabled={loading}>
+        {loading ? "Logging in..." : "Login"}
+      </button>
+
+      {error && <p style={{ color: "red" }}>{error}</p>}
+    </form>
+  )
+}
 export default function App() {
   return (
     <BrowserRouter>
