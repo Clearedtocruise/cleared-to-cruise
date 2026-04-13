@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { BrowserRouter, Routes, Route, useParams } from "react-router-dom"
+import "./App.css"
 
 const API = "https://cleared-to-cruise-api.onrender.com"
 
@@ -2647,278 +2648,724 @@ export default function App() {
 
 const styles = {
   page: {
-    fontFamily: "Arial, sans-serif",
-    background: "#0b1d2a",
-    color: "#ffffff",
     minHeight: "100vh",
+    background:
+      "linear-gradient(180deg, #07131f 0%, #0e2235 35%, #e8eef4 35%, #eef3f7 100%)",
+    padding: "24px",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+    color: "#102030",
   },
 
   header: {
-    padding: "20px",
-    background: "#0f2233",
-    borderBottom: "1px solid #1f3a50",
+    maxWidth: "1200px",
+    margin: "0 auto 22px auto",
   },
 
   headerRow: {
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
+    gap: "16px",
+    flexWrap: "wrap",
   },
 
   title: {
     margin: 0,
-    fontSize: "28px",
+    color: "#ffffff",
+    fontSize: "42px",
+    fontWeight: 800,
+    letterSpacing: "-0.5px",
   },
 
   subtitle: {
-    margin: "5px 0 0",
-    color: "#ccc",
+    marginTop: "8px",
+    color: "rgba(255,255,255,0.82)",
+    fontSize: "16px",
   },
 
   topGrid: {
+    maxWidth: "1200px",
+    margin: "0 auto 20px auto",
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "15px",
-    padding: "20px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+    gap: "18px",
   },
 
   topCardLarge: {
     position: "relative",
-    borderRadius: "12px",
+    minHeight: "270px",
+    borderRadius: "22px",
     overflow: "hidden",
+    boxShadow: "0 14px 40px rgba(0,0,0,0.28)",
+    background: "#0f1720",
   },
 
   largeImage: {
     width: "100%",
-    height: "250px",
+    height: "100%",
+    minHeight: "270px",
     objectFit: "cover",
+    display: "block",
   },
 
   imageOverlay: {
     position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: "15px",
-    background: "rgba(0,0,0,0.6)",
+    inset: 0,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "flex-end",
+    padding: "24px",
+    background: "linear-gradient(to top, rgba(0,0,0,0.62), rgba(0,0,0,0.08))",
   },
 
   overlayTitle: {
     margin: 0,
+    color: "#ffffff",
+    fontSize: "30px",
+    fontWeight: 800,
   },
 
   overlayText: {
-    margin: "5px 0",
+    margin: "8px 0 0 0",
+    color: "rgba(255,255,255,0.92)",
+    fontSize: "15px",
   },
 
   overlayLinkButton: {
-    display: "inline-block",
-    padding: "8px 12px",
-    background: "#0f2233",
-    color: "#fff",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "fit-content",
+    marginTop: "14px",
+    padding: "10px 14px",
+    borderRadius: "12px",
+    background: "rgba(255,255,255,0.12)",
+    color: "#ffffff",
     textDecoration: "none",
-    borderRadius: "6px",
+    fontWeight: 800,
+    fontSize: "14px",
+    border: "1px solid rgba(255,255,255,0.22)",
+    backdropFilter: "blur(6px)",
   },
 
   heroGrid: {
+    maxWidth: "1200px",
+    margin: "0 auto 20px auto",
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-    gap: "15px",
-    padding: "20px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
+    gap: "18px",
+  },
+
+  heroCard: {
+    background: "rgba(255,255,255,0.98)",
+    borderRadius: "20px",
+    overflow: "hidden",
+    boxShadow: "0 10px 28px rgba(14, 34, 53, 0.12)",
+    border: "1px solid rgba(15, 23, 32, 0.06)",
+    display: "flex",
+    flexDirection: "column",
+    transition: "transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease",
+  },
+
+  heroCardSelected: {
+    border: "2px solid #0f2233",
+    boxShadow: "0 16px 36px rgba(15, 34, 51, 0.18)",
+    transform: "translateY(-2px)",
+  },
+
+  heroImage: {
+    width: "100%",
+    height: "220px",
+    objectFit: "cover",
+    display: "block",
+  },
+
+  heroContent: {
+    padding: "16px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+    flex: 1,
+    justifyContent: "space-between",
+  },
+
+  heroTitle: {
+    margin: "0 0 8px 0",
+    fontSize: "20px",
+    fontWeight: 800,
+    color: "#0f2233",
+  },
+
+  heroText: {
+    margin: 0,
+    color: "#5b6b79",
+    lineHeight: 1.5,
+    fontSize: "14px",
+  },
+
+  heroSelectWrap: {
+    marginTop: "auto",
+    paddingTop: "4px",
+  },
+
+  heroSelectLabel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    fontSize: "13px",
+    fontWeight: 800,
+    color: "#203445",
+  },
+
+  heroSelect: {
+    width: "100%",
+    padding: "12px 14px",
+    borderRadius: "12px",
+    border: "1px solid #d5dee7",
+    background: "#fbfdff",
+    fontSize: "14px",
+    color: "#102030",
+    outline: "none",
+    boxSizing: "border-box",
+  },
+
+  heroDropdownActionWrap: {
+    display: "grid",
+    gap: "10px",
+  },
+
+  heroChooseButton: {
+    width: "100%",
+    border: "1px solid #cfd9e3",
+    background: "#ffffff",
+    color: "#102030",
+    padding: "12px 14px",
+    borderRadius: "12px",
+    fontSize: "14px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+
+  heroSelectedButton: {
+    width: "100%",
+    border: "none",
+    background: "#0f2233",
+    color: "#ffffff",
+    padding: "12px 14px",
+    borderRadius: "12px",
+    fontSize: "14px",
+    fontWeight: 800,
+    cursor: "pointer",
+    boxShadow: "0 8px 20px rgba(15, 34, 51, 0.16)",
   },
 
   mainCard: {
-    margin: "20px",
-    padding: "20px",
-    background: "#112b3c",
-    borderRadius: "12px",
+    maxWidth: "1200px",
+    margin: "0 auto 20px auto",
+    background: "rgba(255,255,255,0.98)",
+    borderRadius: "24px",
+    padding: "24px",
+    boxShadow: "0 16px 36px rgba(14, 34, 53, 0.12)",
+    border: "1px solid rgba(15, 23, 32, 0.06)",
+  },
+
+  formHeaderRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "16px",
+    flexWrap: "wrap",
+    marginBottom: "18px",
+  },
+
+  formHeaderActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    flexWrap: "wrap",
+  },
+
+  sectionTitle: {
+    margin: 0,
+    fontSize: "28px",
+    fontWeight: 800,
+    color: "#0f2233",
+  },
+
+  sectionSubtext: {
+    margin: "8px 0 0 0",
+    color: "#627382",
+    fontSize: "15px",
+  },
+
+  badge: {
+    background: "#0f2233",
+    color: "#ffffff",
+    padding: "10px 14px",
+    borderRadius: "999px",
+    fontSize: "14px",
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+  },
+
+  selectedRentalBar: {
+    marginBottom: "18px",
+    background: "#f7fafc",
+    border: "1px solid #e1e8ef",
+    borderRadius: "16px",
+    padding: "14px 16px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    flexWrap: "wrap",
+  },
+
+  selectedRentalLabel: {
+    fontSize: "13px",
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: "0.7px",
+    color: "#6b7d8b",
+  },
+
+  selectedRentalValue: {
+    fontSize: "16px",
+    color: "#0f2233",
   },
 
   formGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "15px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+    gap: "16px",
   },
 
   label: {
     display: "flex",
     flexDirection: "column",
+    gap: "8px",
     fontSize: "14px",
+    fontWeight: 700,
+    color: "#203445",
   },
 
   labelFull: {
-    gridColumn: "1 / -1",
     display: "flex",
     flexDirection: "column",
+    gap: "8px",
+    fontSize: "14px",
+    fontWeight: 700,
+    color: "#203445",
+    gridColumn: "1 / -1",
   },
 
   input: {
-    padding: "10px",
-    borderRadius: "6px",
-    border: "none",
-    marginTop: "5px",
+    width: "100%",
+    padding: "13px 14px",
+    borderRadius: "12px",
+    border: "1px solid #d5dee7",
+    background: "#fbfdff",
+    fontSize: "15px",
+    color: "#102030",
+    outline: "none",
+    boxSizing: "border-box",
   },
 
   fileInput: {
-    marginTop: "5px",
+    width: "100%",
+    padding: "13px 14px",
+    borderRadius: "12px",
+    border: "1px solid #d5dee7",
+    background: "#fbfdff",
+    fontSize: "15px",
+    color: "#102030",
+    boxSizing: "border-box",
   },
 
   fileName: {
-    fontSize: "12px",
-    marginTop: "5px",
-    color: "#ccc",
+    fontSize: "13px",
+    color: "#627382",
   },
 
   priceSummary: {
-    marginTop: "20px",
-    padding: "15px",
-    background: "#0f2233",
-    borderRadius: "10px",
+    marginTop: "18px",
+    background: "#f7fafc",
+    border: "1px solid #e1e8ef",
+    borderRadius: "16px",
+    padding: "16px",
+    display: "grid",
+    gap: "10px",
   },
 
   priceRow: {
     display: "flex",
     justifyContent: "space-between",
-    marginBottom: "5px",
+    gap: "12px",
+    color: "#203445",
+    fontSize: "15px",
   },
 
   priceRowTotal: {
     display: "flex",
     justifyContent: "space-between",
-    marginTop: "10px",
-    fontWeight: "bold",
+    gap: "12px",
+    color: "#0f2233",
     fontSize: "18px",
+    fontWeight: 800,
+    paddingTop: "10px",
+    borderTop: "1px solid #d9e5ef",
   },
 
   buttonRow: {
-    marginTop: "20px",
     display: "flex",
+    gap: "12px",
     flexWrap: "wrap",
-    gap: "10px",
+    marginTop: "22px",
   },
 
   primaryButton: {
-    padding: "10px 15px",
-    background: "#157347",
-    color: "#fff",
     border: "none",
-    borderRadius: "6px",
+    background: "#0f2233",
+    color: "#ffffff",
+    padding: "13px 18px",
+    borderRadius: "12px",
+    fontSize: "15px",
+    fontWeight: 800,
     cursor: "pointer",
+    boxShadow: "0 8px 20px rgba(15, 34, 51, 0.16)",
   },
 
   secondaryButton: {
-    padding: "10px 15px",
-    background: "#1f3a50",
-    color: "#fff",
+    border: "1px solid #cfd9e3",
+    background: "#ffffff",
+    color: "#102030",
+    padding: "13px 18px",
+    borderRadius: "12px",
+    fontSize: "15px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+
+  dangerButton: {
     border: "none",
-    borderRadius: "6px",
+    background: "#b42318",
+    color: "#ffffff",
+    padding: "12px 16px",
+    borderRadius: "12px",
+    fontSize: "14px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+
+  smallButton: {
+    border: "1px solid #d5dee7",
+    background: "#ffffff",
+    color: "#102030",
+    padding: "8px 10px",
+    borderRadius: "10px",
+    fontSize: "13px",
+    fontWeight: 700,
     cursor: "pointer",
   },
 
   buttonDisabled: {
-    padding: "10px 15px",
-    background: "#555",
-    color: "#999",
     border: "none",
-    borderRadius: "6px",
+    background: "#b8c3cd",
+    color: "#ffffff",
+    padding: "13px 18px",
+    borderRadius: "12px",
+    fontSize: "15px",
+    fontWeight: 800,
+    cursor: "not-allowed",
+    opacity: 0.9,
   },
 
   waiverCard: {
-    marginTop: "20px",
+    marginTop: "22px",
     padding: "20px",
-    background: "#0f2233",
-    borderRadius: "10px",
+    borderRadius: "18px",
+    background: "#fff8e8",
+    border: "1px solid #ead9a7",
+  },
+
+  waiverTitle: {
+    marginTop: 0,
+    marginBottom: "14px",
+    fontSize: "22px",
+    fontWeight: 800,
+    color: "#2d2410",
   },
 
   waiverBox: {
-    maxHeight: "200px",
+    maxHeight: "320px",
     overflowY: "auto",
-    fontSize: "13px",
-    marginBottom: "15px",
+    background: "#fffdf7",
+    border: "1px solid #e7dcc0",
+    borderRadius: "12px",
+    padding: "16px",
+    lineHeight: 1.6,
+    color: "#3b3426",
+    marginBottom: "16px",
   },
 
   checkboxRow: {
     display: "flex",
     gap: "10px",
-    alignItems: "center",
-    marginBottom: "10px",
+    alignItems: "flex-start",
+    marginBottom: "16px",
+    fontWeight: 600,
+    color: "#2d2410",
   },
 
   statusGrid: {
+    marginTop: "22px",
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-    gap: "10px",
-    marginTop: "20px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: "14px",
   },
 
   statusCard: {
-    background: "#0f2233",
-    padding: "10px",
-    borderRadius: "8px",
+    background: "#f7fafc",
+    border: "1px solid #e1e8ef",
+    borderRadius: "16px",
+    padding: "16px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
   },
 
   statusLabel: {
     fontSize: "12px",
-    color: "#ccc",
+    textTransform: "uppercase",
+    letterSpacing: "0.8px",
+    color: "#6b7d8b",
+    fontWeight: 800,
   },
 
   statusValue: {
-    fontWeight: "bold",
+    fontSize: "15px",
+    color: "#102030",
+    fontWeight: 700,
+    wordBreak: "break-word",
   },
 
   successBox: {
-    marginTop: "10px",
-    padding: "10px",
-    background: "#157347",
-    borderRadius: "6px",
+    marginTop: "18px",
+    padding: "14px 16px",
+    borderRadius: "14px",
+    background: "#ecfdf3",
+    border: "1px solid #bde6cb",
+    color: "#157347",
+    fontWeight: 700,
+  },
+
+  errorBox: {
+    marginTop: "14px",
+    padding: "14px 16px",
+    borderRadius: "14px",
+    background: "#fef2f2",
+    border: "1px solid #fecaca",
+    color: "#b42318",
+    fontWeight: 700,
   },
 
   infoBox: {
-    marginTop: "10px",
-    padding: "10px",
-    background: "#1f3a50",
-    borderRadius: "6px",
+    marginTop: "14px",
+    padding: "14px 16px",
+    borderRadius: "14px",
+    background: "#f3f7fb",
+    border: "1px solid #d9e5ef",
+    color: "#1d3347",
+    fontWeight: 700,
+  },
+
+  loadingBox: {
+    marginTop: "14px",
+    padding: "14px 16px",
+    borderRadius: "14px",
+    background: "#eef4fb",
+    border: "1px solid #d6e2f0",
+    color: "#28465f",
+    fontWeight: 700,
   },
 
   successPage: {
+    minHeight: "100vh",
     display: "flex",
-    justifyContent: "center",
     alignItems: "center",
-    height: "100vh",
-    background: "#0b1d2a",
+    justifyContent: "center",
+    background: "#eef3f7",
+    padding: "24px",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
   },
 
   successCard: {
-    background: "#112b3c",
+    maxWidth: "640px",
+    width: "100%",
+    background: "#ffffff",
+    borderRadius: "24px",
     padding: "30px",
-    borderRadius: "12px",
-    textAlign: "center",
+    boxShadow: "0 16px 36px rgba(14, 34, 53, 0.12)",
+    border: "1px solid rgba(15, 23, 32, 0.06)",
   },
 
   successTitle: {
-    color: "#4caf50",
+    marginTop: 0,
+    fontSize: "32px",
+    color: "#157347",
   },
 
   cancelTitle: {
-    color: "#e53935",
+    marginTop: 0,
+    fontSize: "32px",
+    color: "#b42318",
   },
 
   successText: {
-    margin: "10px 0",
+    color: "#425466",
+    fontSize: "16px",
+    lineHeight: 1.6,
   },
 
   successDetails: {
-    textAlign: "left",
-    marginTop: "20px",
+    margin: "18px 0 24px 0",
+    padding: "16px",
+    borderRadius: "14px",
+    background: "#f7fafc",
+    border: "1px solid #e1e8ef",
+    display: "grid",
+    gap: "10px",
+  },
+
+  lookupList: {
+    display: "grid",
+    gap: "14px",
+    marginTop: "18px",
+  },
+
+  lookupCard: {
+    marginTop: "18px",
+    background: "#f7fafc",
+    border: "1px solid #e1e8ef",
+    borderRadius: "16px",
+    padding: "16px",
+    display: "grid",
+    gap: "10px",
+  },
+
+  lookupRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexWrap: "wrap",
+    color: "#102030",
+    fontSize: "14px",
   },
 
   policyFooter: {
-    padding: "20px",
+    maxWidth: "1200px",
+    margin: "0 auto",
+    padding: "6px 24px 30px 24px",
     textAlign: "center",
   },
 
   policyText: {
-    fontSize: "12px",
-    color: "#aaa",
+    fontSize: "13px",
+    color: "#5e7080",
+    lineHeight: 1.5,
+  },
+
+  adminPage: {
+    minHeight: "100vh",
+    background: "#eef3f7",
+    padding: "24px",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+    color: "#102030",
+  },
+
+  adminHeader: {
+    maxWidth: "1200px",
+    margin: "0 auto 20px auto",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "16px",
+    flexWrap: "wrap",
+  },
+
+  adminTitle: {
+    margin: 0,
+    fontSize: "36px",
+    fontWeight: 800,
+    color: "#0f2233",
+  },
+
+  adminSection: {
+    maxWidth: "1200px",
+    margin: "0 auto 20px auto",
+    background: "#ffffff",
+    borderRadius: "24px",
+    padding: "24px",
+    boxShadow: "0 16px 36px rgba(14, 34, 53, 0.12)",
+    border: "1px solid rgba(15, 23, 32, 0.06)",
+  },
+
+  tableWrap: {
+    width: "100%",
+    overflowX: "auto",
+  },
+
+  table: {
+    width: "100%",
+    borderCollapse: "collapse",
+    minWidth: "760px",
+  },
+
+  actionWrap: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "8px",
+  },
+
+  adminLoginWrap: {
+    minHeight: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "24px",
+    background: "#eef3f7",
+  },
+
+  adminLoginCard: {
+    width: "100%",
+    maxWidth: "520px",
+    background: "#ffffff",
+    borderRadius: "24px",
+    padding: "30px",
+    boxShadow: "0 16px 36px rgba(14, 34, 53, 0.12)",
+    border: "1px solid rgba(15, 23, 32, 0.06)",
+  },
+
+  adminLoginTitle: {
+    marginTop: 0,
+    marginBottom: "8px",
+    fontSize: "30px",
+    color: "#0f2233",
+  },
+
+  adminLoginText: {
+    marginTop: 0,
+    marginBottom: "20px",
+    color: "#627382",
+    fontSize: "15px",
+    lineHeight: 1.5,
+  },
+
+  adminLoginForm: {
+    display: "grid",
+    gap: "16px",
   },
 }
