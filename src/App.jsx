@@ -1,3 +1,5 @@
+Front end 
+
 import { useEffect, useMemo, useState } from "react"
 import { BrowserRouter, Routes, Route, useParams } from "react-router-dom"
 
@@ -107,13 +109,6 @@ function getRentalLabel(rentalValue) {
   return rentalOptions.find((item) => item.value === rentalValue)?.label || rentalValue
 }
 
-function getHolidayOrOverrideDisplay(basePrice, overridePrice) {
-  if (typeof overridePrice === "number" && overridePrice > 0) {
-    return overridePrice
-  }
-  return basePrice
-}
-
 function getStoredAdminToken() {
   return localStorage.getItem("ctc_admin_token") || ""
 }
@@ -128,6 +123,7 @@ function setStoredAdminToken(token) {
 
 async function adminFetch(path, options = {}) {
   const token = getStoredAdminToken()
+
   const headers = {
     ...(options.headers || {}),
   }
@@ -213,6 +209,43 @@ function statusPillStyle(status) {
         borderColor: "#e5e7eb",
       }
   }
+}
+
+function getMonthLabel(date) {
+  return date.toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  })
+}
+
+function toDateInputValue(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function buildCalendarDays(monthDate) {
+  const start = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1)
+  const end = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0)
+
+  const startWeekday = start.getDay()
+  const totalDays = end.getDate()
+  const cells = []
+
+  for (let i = 0; i < startWeekday; i += 1) {
+    cells.push(null)
+  }
+
+  for (let day = 1; day <= totalDays; day += 1) {
+    cells.push(new Date(monthDate.getFullYear(), monthDate.getMonth(), day))
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push(null)
+  }
+
+  return cells
 }
 
 function BookingLookupCard({ onLoadBooking }) {
@@ -444,7 +477,7 @@ function AdminLoginCard({ onLoginSuccess }) {
         },
         body: JSON.stringify({
           username: username.trim(),
-          password,
+          password: password.trim(),
         }),
       })
 
@@ -546,6 +579,27 @@ function AdminPage() {
   const [editCustomerEmail, setEditCustomerEmail] = useState("")
   const [editPrintedName, setEditPrintedName] = useState("")
   const [editStatus, setEditStatus] = useState("pending_approval")
+
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), 1)
+  })
+
+  const blockedDateMap = useMemo(() => {
+    const map = new Map()
+
+    blockedDates.forEach((item) => {
+      const key = item.date
+      if (!map.has(key)) {
+        map.set(key, [])
+      }
+      map.get(key).push(item)
+    })
+
+    return map
+  }, [blockedDates])
+
+  const calendarDays = useMemo(() => buildCalendarDays(calendarMonth), [calendarMonth])
 
   function handleAdminLogout() {
     setStoredAdminToken("")
@@ -771,11 +825,11 @@ function AdminPage() {
         <h1 style={styles.adminTitle}>Cleared to Cruise Admin</h1>
 
         <div style={styles.buttonRow}>
-          <button style={styles.secondaryButton} onClick={loadAdminData}>
+          <button type="button" style={styles.secondaryButton} onClick={loadAdminData}>
             Refresh
           </button>
 
-          <button style={styles.dangerButton} onClick={handleAdminLogout}>
+          <button type="button" style={styles.dangerButton} onClick={handleAdminLogout}>
             Log Out
           </button>
         </div>
@@ -783,82 +837,92 @@ function AdminPage() {
 
       {message ? <div style={styles.successBox}>{message}</div> : null}
       {error ? <div style={styles.errorBox}>{error}</div> : null}
+      {loading ? <div style={styles.loadingBox}>Loading admin data...</div> : null}
 
-      {loading ? (
-        <div style={styles.loadingBox}>Loading admin data...</div>
-      ) : null}
-
-      {/* ---------------- BOOKINGS ---------------- */}
       <section style={styles.adminSection}>
-        <h2 style={styles.sectionTitle}>Bookings</h2>
+        <div style={styles.formHeaderRow}>
+          <div>
+            <h2 style={styles.sectionTitle}>Bookings</h2>
+            <p style={styles.sectionSubtext}>
+              Approve, deny, confirm, edit, and manage customer bookings.
+            </p>
+          </div>
+        </div>
 
         <div style={styles.tableWrap}>
           <table style={styles.table}>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Rental</th>
-                <th>Date</th>
-                <th>Time</th>
-                <th>Status</th>
-                <th>Payment</th>
-                <th>Actions</th>
+                <th style={styles.tableHead}>ID</th>
+                <th style={styles.tableHead}>Rental</th>
+                <th style={styles.tableHead}>Date</th>
+                <th style={styles.tableHead}>Time</th>
+                <th style={styles.tableHead}>Customer</th>
+                <th style={styles.tableHead}>Status</th>
+                <th style={styles.tableHead}>Payment</th>
+                <th style={styles.tableHead}>Actions</th>
               </tr>
             </thead>
 
             <tbody>
-              {bookings.map((b) => (
-                <tr key={b.id}>
-                  <td>{b.id}</td>
-                  <td>{b.rentalLabel}</td>
-                  <td>{formatDate(b.date)}</td>
-                  <td>{b.rentalTime || "—"}</td>
-
-                  <td>
-                    <span style={statusPillStyle(b.status)}>
-                      {normalizeStatusLabel(b.status)}
+              {bookings.map((booking) => (
+                <tr key={booking.id}>
+                  <td style={styles.tableCell}>{booking.id}</td>
+                  <td style={styles.tableCell}>{booking.rentalLabel || "—"}</td>
+                  <td style={styles.tableCell}>{formatDate(booking.date)}</td>
+                  <td style={styles.tableCell}>{booking.rentalTime || "—"}</td>
+                  <td style={styles.tableCell}>
+                    <div>{booking.waiverPrintedName || "—"}</div>
+                    <div style={styles.lookupMeta}>{booking.customerEmail || "—"}</div>
+                  </td>
+                  <td style={styles.tableCell}>
+                    <span style={statusPillStyle(booking.status || "new")}>
+                      {normalizeStatusLabel(booking.status || "new")}
                     </span>
                   </td>
-
-                  <td>
-                    <span style={statusPillStyle(b.paymentStatus)}>
-                      {normalizeStatusLabel(b.paymentStatus)}
+                  <td style={styles.tableCell}>
+                    <span style={statusPillStyle(booking.paymentStatus || "unpaid")}>
+                      {normalizeStatusLabel(booking.paymentStatus || "unpaid")}
                     </span>
                   </td>
-
-                  <td>
+                  <td style={styles.tableCell}>
                     <div style={styles.actionWrap}>
                       <button
+                        type="button"
                         style={styles.smallButton}
-                        onClick={() => approveBooking(b.id)}
+                        onClick={() => approveBooking(booking.id)}
                       >
                         Approve
                       </button>
 
                       <button
+                        type="button"
                         style={styles.smallButton}
-                        onClick={() => denyBooking(b.id)}
+                        onClick={() => denyBooking(booking.id)}
                       >
                         Deny
                       </button>
 
                       <button
+                        type="button"
                         style={styles.smallButton}
-                        onClick={() => markConfirmed(b.id)}
+                        onClick={() => markConfirmed(booking.id)}
                       >
                         Confirm
                       </button>
 
                       <button
+                        type="button"
                         style={styles.smallButton}
-                        onClick={() => sendDepositLink(b.id)}
+                        onClick={() => sendDepositLink(booking.id)}
                       >
                         Deposit
                       </button>
 
                       <button
+                        type="button"
                         style={styles.secondaryButton}
-                        onClick={() => openEditBooking(b)}
+                        onClick={() => openEditBooking(booking)}
                       >
                         Edit
                       </button>
@@ -871,12 +935,16 @@ function AdminPage() {
         </div>
       </section>
 
-      {/* ---------------- EDIT BOOKING ---------------- */}
       {editingBookingId ? (
         <section style={styles.adminSection}>
-          <h2 style={styles.sectionTitle}>
-            Edit Booking #{editingBookingId}
-          </h2>
+          <div style={styles.formHeaderRow}>
+            <div>
+              <h2 style={styles.sectionTitle}>Edit Booking #{editingBookingId}</h2>
+              <p style={styles.sectionSubtext}>
+                Change date, time, rental, tow location, customer info, or status.
+              </p>
+            </div>
+          </div>
 
           <div style={styles.formGrid}>
             <label style={styles.label}>
@@ -896,8 +964,10 @@ function AdminPage() {
                 value={editTime}
                 onChange={(e) => setEditTime(e.target.value)}
               >
-                {timeOptions.map((t) => (
-                  <option key={t}>{t}</option>
+                {timeOptions.map((time) => (
+                  <option key={time} value={time}>
+                    {time}
+                  </option>
                 ))}
               </select>
             </label>
@@ -909,9 +979,9 @@ function AdminPage() {
                 value={editRentalLabel}
                 onChange={(e) => setEditRentalLabel(e.target.value)}
               >
-                {rentalOptions.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
+                {rentalOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
@@ -924,8 +994,10 @@ function AdminPage() {
                 value={editTowLocation}
                 onChange={(e) => setEditTowLocation(e.target.value)}
               >
-                {towOptions.map((t) => (
-                  <option key={t.value}>{t.value}</option>
+                {towOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.value}
+                  </option>
                 ))}
               </select>
             </label>
@@ -934,15 +1006,17 @@ function AdminPage() {
               Customer Email
               <input
                 style={styles.input}
+                type="email"
                 value={editCustomerEmail}
                 onChange={(e) => setEditCustomerEmail(e.target.value)}
               />
             </label>
 
             <label style={styles.label}>
-              Name
+              Full Name
               <input
                 style={styles.input}
+                type="text"
                 value={editPrintedName}
                 onChange={(e) => setEditPrintedName(e.target.value)}
               />
@@ -955,8 +1029,8 @@ function AdminPage() {
                 value={editStatus}
                 onChange={(e) => setEditStatus(e.target.value)}
               >
-                <option value="pending_approval">Pending</option>
-                <option value="approved_unpaid">Approved</option>
+                <option value="pending_approval">Pending Approval</option>
+                <option value="approved_unpaid">Approved Unpaid</option>
                 <option value="confirmed">Confirmed</option>
                 <option value="denied">Denied</option>
               </select>
@@ -965,49 +1039,66 @@ function AdminPage() {
 
           <div style={styles.buttonRow}>
             <button
+              type="button"
               style={styles.primaryButton}
               onClick={async () => {
                 try {
-                  const res = await adminFetch(
-                    `/api/admin/bookings/${editingBookingId}`,
-                    {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        date: editDate,
-                        rentalTime: editTime,
-                        rentalLabel: editRentalLabel,
-                        towLocation: editTowLocation,
-                        customerEmail: editCustomerEmail,
-                        waiverPrintedName: editPrintedName,
-                        status: editStatus,
-                      }),
-                    }
-                  )
+                  const res = await adminFetch(`/api/admin/bookings/${editingBookingId}`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      date: editDate,
+                      rentalTime: editTime,
+                      rentalLabel: editRentalLabel,
+                      towLocation: editTowLocation,
+                      customerEmail: editCustomerEmail,
+                      waiverPrintedName: editPrintedName,
+                      status: editStatus,
+                    }),
+                  })
 
-                  if (!res.ok) throw new Error()
+                  const data = await res.json().catch(() => ({}))
+
+                  if (!res.ok) {
+                    setError(data.error || "Failed to update booking.")
+                    return
+                  }
 
                   setMessage("Booking updated.")
                   cancelEditBooking()
-                  loadAdminData()
-                } catch {
-                  setError("Failed to update booking.")
+                  await loadAdminData()
+                } catch (err) {
+                  console.error(err)
+                  if (err.message === "ADMIN_AUTH_REQUIRED") {
+                    handleAdminLogout()
+                    setError("Please log in again.")
+                  } else {
+                    setError("Server error while updating booking.")
+                  }
                 }
               }}
             >
               Save Changes
             </button>
 
-            <button style={styles.secondaryButton} onClick={cancelEditBooking}>
+            <button type="button" style={styles.secondaryButton} onClick={cancelEditBooking}>
               Cancel
             </button>
           </div>
         </section>
       ) : null}
 
-      {/* ---------------- HOLIDAY PRICING ---------------- */}
       <section style={styles.adminSection}>
-        <h2 style={styles.sectionTitle}>Holiday Pricing</h2>
+        <div style={styles.formHeaderRow}>
+          <div>
+            <h2 style={styles.sectionTitle}>Holiday Pricing</h2>
+            <p style={styles.sectionSubtext}>
+              Set a special holiday price for a specific rental on a specific date.
+            </p>
+          </div>
+        </div>
 
         <div style={styles.formGrid}>
           <label style={styles.label}>
@@ -1027,9 +1118,9 @@ function AdminPage() {
               value={holidayRentalLabel}
               onChange={(e) => setHolidayRentalLabel(e.target.value)}
             >
-              {rentalOptions.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
+              {rentalOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -1059,6 +1150,7 @@ function AdminPage() {
 
         <div style={styles.buttonRow}>
           <button
+            type="button"
             style={styles.primaryButton}
             onClick={async () => {
               setError("")
@@ -1067,7 +1159,9 @@ function AdminPage() {
               try {
                 const res = await adminFetch("/api/admin/pricing/holiday", {
                   method: "POST",
-                  headers: { "Content-Type": "application/json" },
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
                   body: JSON.stringify({
                     date: holidayDate,
                     rentalLabel: holidayRentalLabel,
@@ -1106,9 +1200,15 @@ function AdminPage() {
         </div>
       </section>
 
-      {/* ---------------- MANUAL PRICING / FRIENDS & FAMILY ---------------- */}
       <section style={styles.adminSection}>
-        <h2 style={styles.sectionTitle}>Manual Pricing / Friends & Family</h2>
+        <div style={styles.formHeaderRow}>
+          <div>
+            <h2 style={styles.sectionTitle}>Manual Pricing / Friends & Family</h2>
+            <p style={styles.sectionSubtext}>
+              Add a discount or manual price override by booking ID or customer email.
+            </p>
+          </div>
+        </div>
 
         <div style={styles.formGrid}>
           <label style={styles.label}>
@@ -1169,6 +1269,7 @@ function AdminPage() {
 
         <div style={styles.buttonRow}>
           <button
+            type="button"
             style={styles.primaryButton}
             onClick={async () => {
               setError("")
@@ -1177,7 +1278,9 @@ function AdminPage() {
               try {
                 const res = await adminFetch("/api/admin/pricing/manual", {
                   method: "POST",
-                  headers: { "Content-Type": "application/json" },
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
                   body: JSON.stringify({
                     bookingId: discountBookingId.trim(),
                     customerEmail: discountEmail.trim(),
@@ -1219,9 +1322,100 @@ function AdminPage() {
         </div>
       </section>
 
-      {/* ---------------- BLOCKED DATES ---------------- */}
       <section style={styles.adminSection}>
-        <h2 style={styles.sectionTitle}>Block a Date</h2>
+        <div style={styles.formHeaderRow}>
+          <div>
+            <h2 style={styles.sectionTitle}>Blocked Dates Calendar</h2>
+            <p style={styles.sectionSubtext}>
+              View blocked dates visually and tap a day to prefill the block form.
+            </p>
+          </div>
+
+          <div style={styles.buttonRow}>
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={() =>
+                setCalendarMonth(
+                  new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1)
+                )
+              }
+            >
+              Previous
+            </button>
+
+            <div style={styles.calendarMonthLabel}>{getMonthLabel(calendarMonth)}</div>
+
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={() =>
+                setCalendarMonth(
+                  new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1)
+                )
+              }
+            >
+              Next
+            </button>
+          </div>
+        </div>
+
+        <div style={styles.calendarGrid}>
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+            <div key={day} style={styles.calendarHeaderCell}>
+              {day}
+            </div>
+          ))}
+
+          {calendarDays.map((day, index) => {
+            if (!day) {
+              return <div key={`empty-${index}`} style={styles.calendarEmptyCell} />
+            }
+
+            const key = toDateInputValue(day)
+            const dayBlocks = blockedDateMap.get(key) || []
+            const isBlocked = dayBlocks.length > 0
+
+            return (
+              <button
+                key={key}
+                type="button"
+                style={{
+                  ...styles.calendarDayCell,
+                  ...(isBlocked ? styles.calendarDayBlocked : {}),
+                }}
+                onClick={() => {
+                  setBlockDate(key)
+                  if (dayBlocks[0]?.rentalLabel) {
+                    setBlockRentalLabel(dayBlocks[0].rentalLabel)
+                  }
+                  if (dayBlocks[0]?.reason) {
+                    setBlockReason(dayBlocks[0].reason)
+                  }
+                }}
+              >
+                <span style={styles.calendarDayNumber}>{day.getDate()}</span>
+
+                {isBlocked ? (
+                  <span style={styles.calendarBlockedText}>
+                    {dayBlocks[0]?.rentalLabel || "Blocked"}
+                  </span>
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      <section style={styles.adminSection}>
+        <div style={styles.formHeaderRow}>
+          <div>
+            <h2 style={styles.sectionTitle}>Block a Date</h2>
+            <p style={styles.sectionSubtext}>
+              Block dates for maintenance, weather, manual blackout dates, or holidays.
+            </p>
+          </div>
+        </div>
 
         <div style={styles.formGrid}>
           <label style={styles.label}>
@@ -1264,6 +1458,7 @@ function AdminPage() {
 
         <div style={styles.buttonRow}>
           <button
+            type="button"
             style={styles.primaryButton}
             onClick={async () => {
               if (!blockDate) {
@@ -1278,7 +1473,9 @@ function AdminPage() {
               try {
                 const res = await adminFetch("/api/admin/block-date", {
                   method: "POST",
-                  headers: { "Content-Type": "application/json" },
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
                   body: JSON.stringify({
                     date: blockDate,
                     reason: blockReason.trim(),
@@ -1316,9 +1513,15 @@ function AdminPage() {
         </div>
       </section>
 
-      {/* ---------------- ACTIVE PRICING OVERRIDES ---------------- */}
       <section style={styles.adminSection}>
-        <h2 style={styles.sectionTitle}>Active Pricing Overrides</h2>
+        <div style={styles.formHeaderRow}>
+          <div>
+            <h2 style={styles.sectionTitle}>Active Pricing Overrides</h2>
+            <p style={styles.sectionSubtext}>
+              Review and remove active holiday pricing, discounts, or manual price overrides.
+            </p>
+          </div>
+        </div>
 
         {pricingOverrides.length === 0 ? (
           <div style={styles.infoBox}>No active pricing overrides found.</div>
@@ -1349,7 +1552,9 @@ function AdminPage() {
                 </div>
                 <div style={styles.lookupRow}>
                   <strong>Amount:</strong>{" "}
-                  ${typeof item.overrideAmount === "number" ? (item.overrideAmount / 100).toFixed(2) : "0.00"}
+                  ${typeof item.overrideAmount === "number"
+                    ? (item.overrideAmount / 100).toFixed(2)
+                    : "0.00"}
                 </div>
 
                 <div style={styles.buttonRow}>
@@ -1396,9 +1601,15 @@ function AdminPage() {
         )}
       </section>
 
-      {/* ---------------- BLOCKED DATE LIST ---------------- */}
       <section style={styles.adminSection}>
-        <h2 style={styles.sectionTitle}>Blocked Dates</h2>
+        <div style={styles.formHeaderRow}>
+          <div>
+            <h2 style={styles.sectionTitle}>Blocked Dates</h2>
+            <p style={styles.sectionSubtext}>
+              Review and remove blocked dates already in the system.
+            </p>
+          </div>
+        </div>
 
         {blockedDates.length === 0 ? (
           <div style={styles.infoBox}>No blocked dates found.</div>
@@ -1664,8 +1875,7 @@ function MainApp() {
 
   const rentalPrice = useMemo(() => getRentalPrice(rental), [rental])
   const towPrice = useMemo(() => getTowPrice(location), [location])
-  const displayRentalPrice = useMemo(() => getHolidayOrOverrideDisplay(rentalPrice), [rentalPrice])
-  const totalAmount = useMemo(() => displayRentalPrice + towPrice, [displayRentalPrice, towPrice])
+  const totalAmount = useMemo(() => rentalPrice + towPrice, [rentalPrice, towPrice])
 
   function resetBookingForm() {
     setBookingId(null)
@@ -1726,18 +1936,14 @@ function MainApp() {
         `${API}/api/availability?rentalLabel=${encodeURIComponent(selectedRental)}&date=${selectedDate}`
       )
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
         setAvailabilityMessage(data.error || "Could not check availability.")
         return
       }
 
-      if (data.available) {
-        setAvailabilityMessage("✅ Available")
-      } else {
-        setAvailabilityMessage("❌ Not available")
-      }
+      setAvailabilityMessage(data.available ? "✅ Available" : "❌ Not available")
     } catch (err) {
       console.error(err)
       setAvailabilityMessage("Error checking availability.")
@@ -1752,18 +1958,18 @@ function MainApp() {
       return
     }
 
-    if (!name) {
-      setStatusMessage("Please enter your name.")
+    if (!name.trim()) {
+      setStatusMessage("Please enter your full legal name.")
       return
     }
 
-    if (!file) {
+    if (!email.trim()) {
+      setStatusMessage("Please enter your email address.")
+      return
+    }
+
+    if (!file && !bookingId) {
       setStatusMessage("Please upload your photo ID.")
-      return
-    }
-
-    if (!waiverAccepted) {
-      setStatusMessage("You must accept the waiver before continuing.")
       return
     }
 
@@ -1771,15 +1977,23 @@ function MainApp() {
     setStatusMessage("Submitting booking request...")
 
     try {
+      if (bookingId) {
+        setStatusMessage("Booking loaded. Continue with waiver or payment below.")
+        setLoading(false)
+        return
+      }
+
       const formData = new FormData()
       formData.append("rentalLabel", rental)
       formData.append("date", date)
       formData.append("rentalTime", rentalTime)
       formData.append("towLocation", location)
-      formData.append("waiverPrintedName", name)
-      formData.append("waiverAccepted", waiverAccepted)
-      formData.append("customerEmail", email)
-      formData.append("photoId", file)
+      formData.append("waiverPrintedName", name.trim())
+      formData.append("waiverAccepted", waiverAccepted ? "true" : "false")
+      formData.append("customerEmail", email.trim())
+      if (file) {
+        formData.append("photoId", file)
+      }
 
       const res = await fetch(`${API}/api/bookings/waiver`, {
         method: "POST",
@@ -1796,11 +2010,11 @@ function MainApp() {
 
       setBookingId(data.bookingId)
       setBookingStatus("pending_approval")
-      setWaiverStatus("signed")
-      setShowWaiver(false)
+      setWaiverStatus(waiverAccepted ? "signed" : "not_started")
+      setShowWaiver(!waiverAccepted)
 
       setStatusMessage(
-        `Booking submitted! ID: ${data.bookingId}. Awaiting admin approval.`
+        `Booking submitted. Booking ID: ${data.bookingId}. Awaiting admin approval.`
       )
     } catch (error) {
       console.error(error)
@@ -1813,6 +2027,11 @@ function MainApp() {
   async function handleSignWaiver() {
     if (!bookingId) {
       setStatusMessage("No booking found to sign waiver.")
+      return
+    }
+
+    if (!waiverAccepted) {
+      setStatusMessage("You must agree to the waiver before signing.")
       return
     }
 
@@ -1832,7 +2051,11 @@ function MainApp() {
       setShowWaiver(false)
       setWaiverAccepted(true)
 
-      setStatusMessage("Waiver signed successfully.")
+      if (bookingStatus === "approved_unpaid") {
+        setStatusMessage("Waiver signed. Your booking is approved and ready for payment.")
+      } else {
+        setStatusMessage("Waiver signed successfully.")
+      }
     } catch (error) {
       console.error(error)
       setStatusMessage("Server error signing waiver.")
@@ -1965,77 +2188,11 @@ function MainApp() {
   }
 
   if (depositRequestBookingId) {
-    return (
-      <div style={styles.successPage}>
-        <div style={styles.successCard}>
-          <h1 style={styles.successTitle}>Security Deposit Authorization</h1>
-          <p style={styles.successText}>
-            Please securely authorize your $500 security deposit hold using the button below.
-          </p>
-          <p style={styles.successText}>
-            This is a hold for damage protection, not the rental charge itself.
-          </p>
-          <button
-            style={styles.primaryButton}
-            onClick={async () => {
-              try {
-                const res = await fetch(`${API}/api/deposit/${depositRequestBookingId}`, {
-                  method: "POST",
-                })
-                const data = await res.json().catch(() => ({}))
-
-                if (res.ok && data.url) {
-                  window.location.href = data.url
-                } else {
-                  alert(data.error || "Could not open deposit authorization.")
-                }
-              } catch (error) {
-                console.error(error)
-                alert("Server error opening deposit authorization.")
-              }
-            }}
-          >
-            Authorize $500 Deposit
-          </button>
-        </div>
-      </div>
-    )
+    return <DepositPage />
   }
 
   if (payRequestBookingId) {
-    return (
-      <div style={styles.successPage}>
-        <div style={styles.successCard}>
-          <h1 style={styles.successTitle}>Complete Your Payment</h1>
-          <p style={styles.successText}>
-            Your booking has been approved. Click below to open secure checkout.
-          </p>
-
-          <button
-            style={styles.primaryButton}
-            onClick={async () => {
-              try {
-                const res = await fetch(`${API}/api/create-checkout/${payRequestBookingId}`, {
-                  method: "POST",
-                })
-                const data = await res.json().catch(() => ({}))
-
-                if (res.ok && data.url) {
-                  window.location.href = data.url
-                } else {
-                  alert(data.error || "Could not create checkout session.")
-                }
-              } catch (error) {
-                console.error(error)
-                alert("Server error while creating checkout.")
-              }
-            }}
-          >
-            Pay Rental Now
-          </button>
-        </div>
-      </div>
-    )
+    return <PaymentPage />
   }
 
   if (path === "/success") {
@@ -2051,31 +2208,14 @@ function MainApp() {
             <p style={styles.successText}>Loading booking details...</p>
           ) : successBooking ? (
             <div style={styles.successDetails}>
-              <div>
-                <strong>Booking ID:</strong> {successBooking.id}
-              </div>
-              <div>
-                <strong>Rental:</strong> {successBooking.rentalLabel}
-              </div>
-              <div>
-                <strong>Date:</strong> {successBooking.date}
-              </div>
-              <div>
-                <strong>Time:</strong> {successBooking.rentalTime || "Not provided"}
-              </div>
-              <div>
-                <strong>Tow Location:</strong> {successBooking.towLocation}
-              </div>
-              <div>
-                <strong>Email:</strong> {successBooking.customerEmail || "Not provided"}
-              </div>
-              <div>
-                <strong>Payment Status:</strong>{" "}
-                {normalizeStatusLabel(successBooking.paymentStatus)}
-              </div>
-              <div>
-                <strong>Status:</strong> {normalizeStatusLabel(successBooking.status)}
-              </div>
+              <div><strong>Booking ID:</strong> {successBooking.id}</div>
+              <div><strong>Rental:</strong> {successBooking.rentalLabel}</div>
+              <div><strong>Date:</strong> {successBooking.date}</div>
+              <div><strong>Time:</strong> {successBooking.rentalTime || "Not provided"}</div>
+              <div><strong>Tow Location:</strong> {successBooking.towLocation}</div>
+              <div><strong>Email:</strong> {successBooking.customerEmail || "Not provided"}</div>
+              <div><strong>Payment Status:</strong> {normalizeStatusLabel(successBooking.paymentStatus)}</div>
+              <div><strong>Status:</strong> {normalizeStatusLabel(successBooking.status)}</div>
             </div>
           ) : (
             <p style={styles.successText}>
@@ -2083,12 +2223,7 @@ function MainApp() {
             </p>
           )}
 
-          <button
-            style={styles.primaryButton}
-            onClick={() => {
-              window.location.href = "/"
-            }}
-          >
+          <button style={styles.primaryButton} onClick={() => (window.location.href = "/")}>
             Return Home
           </button>
         </div>
@@ -2102,12 +2237,7 @@ function MainApp() {
         <div style={styles.successCard}>
           <h1 style={styles.cancelTitle}>❌ Payment Cancelled</h1>
           <p style={styles.successText}>Your checkout was cancelled. No payment was completed.</p>
-          <button
-            style={styles.primaryButton}
-            onClick={() => {
-              window.location.href = "/"
-            }}
-          >
+          <button style={styles.primaryButton} onClick={() => (window.location.href = "/")}>
             Return Home
           </button>
         </div>
@@ -2283,7 +2413,7 @@ function MainApp() {
           <div style={styles.priceSummary}>
             <div style={styles.priceRow}>
               <span>Rental</span>
-              <strong>${displayRentalPrice}</strong>
+              <strong>${rentalPrice}</strong>
             </div>
 
             <div style={styles.priceRow}>
@@ -2421,9 +2551,7 @@ function MainApp() {
 
             <button
               type="button"
-              style={
-                !waiverAccepted || !name.trim() ? styles.buttonDisabled : styles.secondaryButton
-              }
+              style={!waiverAccepted || !name.trim() ? styles.buttonDisabled : styles.secondaryButton}
               onClick={handleSignWaiver}
               disabled={!waiverAccepted || !name.trim()}
             >
@@ -2437,27 +2565,22 @@ function MainApp() {
             <span style={styles.statusLabel}>Booking ID</span>
             <span style={styles.statusValue}>{bookingId || "Not created yet"}</span>
           </div>
-
           <div style={styles.statusCard}>
             <span style={styles.statusLabel}>Booking Status</span>
             <span style={styles.statusValue}>{normalizeStatusLabel(bookingStatus)}</span>
           </div>
-
           <div style={styles.statusCard}>
             <span style={styles.statusLabel}>Waiver Status</span>
             <span style={styles.statusValue}>{normalizeStatusLabel(waiverStatus)}</span>
           </div>
-
           <div style={styles.statusCard}>
             <span style={styles.statusLabel}>Rental</span>
             <span style={styles.statusValue}>{rental}</span>
           </div>
-
           <div style={styles.statusCard}>
             <span style={styles.statusLabel}>Date</span>
             <span style={styles.statusValue}>{date || "Not selected"}</span>
           </div>
-
           <div style={styles.statusCard}>
             <span style={styles.statusLabel}>Time</span>
             <span style={styles.statusValue}>{rentalTime || "Not selected"}</span>
@@ -2494,549 +2617,278 @@ export default function App() {
 
 const styles = {
   page: {
+    fontFamily: "Arial, sans-serif",
+    background: "#0b1d2a",
+    color: "#ffffff",
     minHeight: "100vh",
-    background:
-      "linear-gradient(180deg, #07131f 0%, #0e2235 35%, #e8eef4 35%, #eef3f7 100%)",
-    padding: "24px",
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-    color: "#102030",
   },
+
   header: {
-    maxWidth: "1200px",
-    margin: "0 auto 22px auto",
+    padding: "20px",
+    background: "#0f2233",
+    borderBottom: "1px solid #1f3a50",
   },
+
   headerRow: {
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "16px",
-    flexWrap: "wrap",
-  },
-  title: {
-    margin: 0,
-    color: "#ffffff",
-    fontSize: "42px",
-    fontWeight: 800,
-  },
-  subtitle: {
-    marginTop: "8px",
-    color: "rgba(255,255,255,0.82)",
-    fontSize: "16px",
-  },
-  topGrid: {
-    maxWidth: "1200px",
-    margin: "0 auto 20px auto",
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-    gap: "18px",
-  },
-  topCardLarge: {
-    position: "relative",
-    minHeight: "270px",
-    borderRadius: "22px",
-    overflow: "hidden",
-    boxShadow: "0 14px 40px rgba(0,0,0,0.28)",
-    background: "#0f1720",
-  },
-  largeImage: {
-    width: "100%",
-    height: "100%",
-    minHeight: "270px",
-    objectFit: "cover",
-    display: "block",
-  },
-  imageOverlay: {
-    position: "absolute",
-    inset: 0,
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "flex-end",
-    padding: "24px",
-    background: "linear-gradient(to top, rgba(0,0,0,0.62), rgba(0,0,0,0.08))",
-  },
-  overlayTitle: {
-    margin: 0,
-    color: "#ffffff",
-    fontSize: "30px",
-    fontWeight: 800,
-  },
-  overlayText: {
-    margin: "8px 0 0 0",
-    color: "rgba(255,255,255,0.92)",
-    fontSize: "15px",
-  },
-  overlayLinkButton: {
-    display: "inline-flex",
     alignItems: "center",
-    justifyContent: "center",
-    width: "fit-content",
-    marginTop: "14px",
-    padding: "10px 14px",
-    borderRadius: "12px",
-    background: "rgba(255,255,255,0.12)",
-    color: "#ffffff",
-    textDecoration: "none",
-    fontWeight: 800,
-    fontSize: "14px",
-    border: "1px solid rgba(255,255,255,0.22)",
-    backdropFilter: "blur(6px)",
-  },
-  heroGrid: {
-    maxWidth: "1200px",
-    margin: "0 auto 20px auto",
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
-    gap: "18px",
-  },
-  heroCard: {
-    background: "rgba(255,255,255,0.98)",
-    borderRadius: "20px",
-    overflow: "hidden",
-    boxShadow: "0 10px 28px rgba(14, 34, 53, 0.12)",
-    border: "1px solid rgba(15, 23, 32, 0.06)",
-    display: "flex",
-    flexDirection: "column",
-    transition: "transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease",
-  },
-  heroCardSelected: {
-    border: "2px solid #0f2233",
-    boxShadow: "0 16px 36px rgba(15, 34, 51, 0.18)",
-    transform: "translateY(-2px)",
-  },
-  heroImage: {
-    width: "100%",
-    height: "220px",
-    objectFit: "cover",
-    display: "block",
-  },
-  heroContent: {
-    padding: "16px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "12px",
-    flex: 1,
-    justifyContent: "space-between",
-  },
-  heroTitle: {
-    margin: "0 0 8px 0",
-    fontSize: "20px",
-    fontWeight: 800,
-    color: "#0f2233",
-  },
-  heroText: {
-    margin: 0,
-    color: "#5b6b79",
-    lineHeight: 1.5,
-    fontSize: "14px",
-  },
-  heroSelectWrap: {
-    marginTop: "auto",
-    paddingTop: "4px",
-  },
-  heroSelectLabel: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
-    fontSize: "13px",
-    fontWeight: 800,
-    color: "#203445",
-  },
-  heroSelect: {
-    width: "100%",
-    padding: "12px 14px",
-    borderRadius: "12px",
-    border: "1px solid #d5dee7",
-    background: "#fbfdff",
-    fontSize: "14px",
-    color: "#102030",
-    outline: "none",
-    boxSizing: "border-box",
-  },
-  heroDropdownActionWrap: {
-    display: "grid",
-    gap: "10px",
-  },
-  heroChooseButton: {
-    width: "100%",
-    border: "1px solid #cfd9e3",
-    background: "#ffffff",
-    color: "#102030",
-    padding: "12px 14px",
-    borderRadius: "12px",
-    fontSize: "14px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  heroSelectedButton: {
-    width: "100%",
-    border: "none",
-    background: "#0f2233",
-    color: "#ffffff",
-    padding: "12px 14px",
-    borderRadius: "12px",
-    fontSize: "14px",
-    fontWeight: 800,
-    cursor: "pointer",
-    boxShadow: "0 8px 20px rgba(15, 34, 51, 0.16)",
-  },
-  mainCard: {
-    maxWidth: "1200px",
-    margin: "0 auto 20px auto",
-    background: "rgba(255,255,255,0.98)",
-    borderRadius: "24px",
-    padding: "24px",
-    boxShadow: "0 16px 36px rgba(14, 34, 53, 0.12)",
-    border: "1px solid rgba(15, 23, 32, 0.06)",
   },
 
-  formHeaderRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "16px",
-    flexWrap: "wrap",
-    marginBottom: "18px",
-  },
-  formHeaderActions: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    flexWrap: "wrap",
-  },
-  sectionTitle: {
+  title: {
     margin: 0,
     fontSize: "28px",
-    fontWeight: 800,
-    color: "#0f2233",
   },
-  sectionSubtext: {
-    margin: "8px 0 0 0",
-    color: "#627382",
-    fontSize: "15px",
+
+  subtitle: {
+    margin: "5px 0 0",
+    color: "#ccc",
   },
-  badge: {
+
+  topGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "15px",
+    padding: "20px",
+  },
+
+  topCardLarge: {
+    position: "relative",
+    borderRadius: "12px",
+    overflow: "hidden",
+  },
+
+  largeImage: {
+    width: "100%",
+    height: "250px",
+    objectFit: "cover",
+  },
+
+  imageOverlay: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: "15px",
+    background: "rgba(0,0,0,0.6)",
+  },
+
+  overlayTitle: {
+    margin: 0,
+  },
+
+  overlayText: {
+    margin: "5px 0",
+  },
+
+  overlayLinkButton: {
+    display: "inline-block",
+    padding: "8px 12px",
     background: "#0f2233",
-    color: "#ffffff",
-    padding: "10px 14px",
-    borderRadius: "999px",
-    fontSize: "14px",
-    fontWeight: 700,
-    whiteSpace: "nowrap",
+    color: "#fff",
+    textDecoration: "none",
+    borderRadius: "6px",
   },
-  selectedRentalBar: {
-    marginBottom: "18px",
-    background: "#f7fafc",
-    border: "1px solid #e1e8ef",
-    borderRadius: "16px",
-    padding: "14px 16px",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "12px",
-    flexWrap: "wrap",
+
+  heroGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+    gap: "15px",
+    padding: "20px",
   },
-  selectedRentalLabel: {
-    fontSize: "13px",
-    fontWeight: 800,
-    textTransform: "uppercase",
-    letterSpacing: "0.7px",
-    color: "#6b7d8b",
+
+  mainCard: {
+    margin: "20px",
+    padding: "20px",
+    background: "#112b3c",
+    borderRadius: "12px",
   },
-  selectedRentalValue: {
-    fontSize: "16px",
-    color: "#0f2233",
-  },
+
   formGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-    gap: "16px",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "15px",
   },
+
   label: {
     display: "flex",
     flexDirection: "column",
-    gap: "8px",
     fontSize: "14px",
-    fontWeight: 700,
-    color: "#203445",
   },
+
   labelFull: {
+    gridColumn: "1 / -1",
     display: "flex",
     flexDirection: "column",
-    gap: "8px",
-    fontSize: "14px",
-    fontWeight: 700,
-    color: "#203445",
-    gridColumn: "1 / -1",
   },
+
   input: {
-    width: "100%",
-    padding: "13px 14px",
-    borderRadius: "12px",
-    border: "1px solid #d5dee7",
-    background: "#fbfdff",
-    fontSize: "15px",
-    color: "#102030",
-    outline: "none",
-    boxSizing: "border-box",
+    padding: "10px",
+    borderRadius: "6px",
+    border: "none",
+    marginTop: "5px",
   },
+
   fileInput: {
-    width: "100%",
-    padding: "13px 14px",
-    borderRadius: "12px",
-    border: "1px solid #d5dee7",
-    background: "#fbfdff",
-    fontSize: "15px",
-    color: "#102030",
-    boxSizing: "border-box",
+    marginTop: "5px",
   },
+
   fileName: {
-    fontSize: "13px",
-    color: "#627382",
+    fontSize: "12px",
+    marginTop: "5px",
+    color: "#ccc",
   },
+
   priceSummary: {
-    marginTop: "18px",
-    background: "#f7fafc",
-    border: "1px solid #e1e8ef",
-    borderRadius: "16px",
-    padding: "16px",
-    display: "grid",
-    gap: "10px",
+    marginTop: "20px",
+    padding: "15px",
+    background: "#0f2233",
+    borderRadius: "10px",
   },
+
   priceRow: {
     display: "flex",
     justifyContent: "space-between",
-    gap: "12px",
-    color: "#203445",
-    fontSize: "15px",
+    marginBottom: "5px",
   },
+
   priceRowTotal: {
     display: "flex",
     justifyContent: "space-between",
-    gap: "12px",
-    color: "#0f2233",
+    marginTop: "10px",
+    fontWeight: "bold",
     fontSize: "18px",
-    fontWeight: 800,
-    paddingTop: "10px",
-    borderTop: "1px solid #d9e5ef",
   },
+
   buttonRow: {
+    marginTop: "20px",
     display: "flex",
-    gap: "12px",
     flexWrap: "wrap",
-    marginTop: "22px",
+    gap: "10px",
   },
+
   primaryButton: {
+    padding: "10px 15px",
+    background: "#157347",
+    color: "#fff",
     border: "none",
-    background: "#0f2233",
-    color: "#ffffff",
-    padding: "13px 18px",
-    borderRadius: "12px",
-    fontSize: "15px",
-    fontWeight: 800,
+    borderRadius: "6px",
     cursor: "pointer",
-    boxShadow: "0 8px 20px rgba(15, 34, 51, 0.16)",
   },
+
   secondaryButton: {
-    border: "1px solid #cfd9e3",
-    background: "#ffffff",
-    color: "#102030",
-    padding: "13px 18px",
-    borderRadius: "12px",
-    fontSize: "15px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  dangerButton: {
+    padding: "10px 15px",
+    background: "#1f3a50",
+    color: "#fff",
     border: "none",
-    background: "#b42318",
-    color: "#ffffff",
-    padding: "12px 16px",
-    borderRadius: "12px",
-    fontSize: "14px",
-    fontWeight: 800,
+    borderRadius: "6px",
     cursor: "pointer",
   },
-  smallButton: {
-    border: "1px solid #d5dee7",
-    background: "#ffffff",
-    color: "#102030",
-    padding: "8px 10px",
-    borderRadius: "10px",
-    fontSize: "13px",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
+
   buttonDisabled: {
+    padding: "10px 15px",
+    background: "#555",
+    color: "#999",
     border: "none",
-    background: "#b8c3cd",
-    color: "#ffffff",
-    padding: "13px 18px",
-    borderRadius: "12px",
-    fontSize: "15px",
-    fontWeight: 800,
-    cursor: "not-allowed",
-    opacity: 0.9,
+    borderRadius: "6px",
   },
+
   waiverCard: {
-    marginTop: "22px",
+    marginTop: "20px",
     padding: "20px",
-    borderRadius: "18px",
-    background: "#fff8e8",
-    border: "1px solid #ead9a7",
+    background: "#0f2233",
+    borderRadius: "10px",
   },
-  waiverTitle: {
-    marginTop: 0,
-    marginBottom: "14px",
-    fontSize: "22px",
-    fontWeight: 800,
-    color: "#2d2410",
-  },
+
   waiverBox: {
-    maxHeight: "320px",
+    maxHeight: "200px",
     overflowY: "auto",
-    background: "#fffdf7",
-    border: "1px solid #e7dcc0",
-    borderRadius: "12px",
-    padding: "16px",
-    lineHeight: 1.6,
-    color: "#3b3426",
-    marginBottom: "16px",
+    fontSize: "13px",
+    marginBottom: "15px",
   },
+
   checkboxRow: {
     display: "flex",
     gap: "10px",
-    alignItems: "flex-start",
-    marginBottom: "16px",
-    fontWeight: 600,
-    color: "#2d2410",
+    alignItems: "center",
+    marginBottom: "10px",
   },
+
   statusGrid: {
-    marginTop: "22px",
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: "14px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: "10px",
+    marginTop: "20px",
   },
+
   statusCard: {
-    background: "#f7fafc",
-    border: "1px solid #e1e8ef",
-    borderRadius: "16px",
-    padding: "16px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
+    background: "#0f2233",
+    padding: "10px",
+    borderRadius: "8px",
   },
+
   statusLabel: {
     fontSize: "12px",
-    textTransform: "uppercase",
-    letterSpacing: "0.8px",
-    color: "#6b7d8b",
-    fontWeight: 800,
+    color: "#ccc",
   },
+
   statusValue: {
-    fontSize: "15px",
-    color: "#102030",
-    fontWeight: 700,
-    wordBreak: "break-word",
+    fontWeight: "bold",
   },
+
   successBox: {
-    marginTop: "18px",
-    padding: "14px 16px",
-    borderRadius: "14px",
-    background: "#ecfdf3",
-    border: "1px solid #bde6cb",
-    color: "#157347",
-    fontWeight: 700,
+    marginTop: "10px",
+    padding: "10px",
+    background: "#157347",
+    borderRadius: "6px",
   },
-  errorBox: {
-    marginTop: "14px",
-    padding: "14px 16px",
-    borderRadius: "14px",
-    background: "#fef2f2",
-    border: "1px solid #fecaca",
-    color: "#b42318",
-    fontWeight: 700,
-  },
+
   infoBox: {
-    marginTop: "14px",
-    padding: "14px 16px",
-    borderRadius: "14px",
-    background: "#f3f7fb",
-    border: "1px solid #d9e5ef",
-    color: "#1d3347",
-    fontWeight: 700,
+    marginTop: "10px",
+    padding: "10px",
+    background: "#1f3a50",
+    borderRadius: "6px",
   },
-  loadingBox: {
-    marginTop: "14px",
-    padding: "14px 16px",
-    borderRadius: "14px",
-    background: "#eef4fb",
-    border: "1px solid #d6e2f0",
-    color: "#28465f",
-    fontWeight: 700,
-  },
+
   successPage: {
-    minHeight: "100vh",
     display: "flex",
-    alignItems: "center",
     justifyContent: "center",
-    background: "#eef3f7",
-    padding: "24px",
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-  },
-  successCard: {
-    maxWidth: "640px",
-    width: "100%",
-    background: "#ffffff",
-    borderRadius: "24px",
-    padding: "30px",
-    boxShadow: "0 16px 36px rgba(14, 34, 53, 0.12)",
-    border: "1px solid rgba(15, 23, 32, 0.06)",
-  },
-  successTitle: {
-    marginTop: 0,
-    fontSize: "32px",
-    color: "#157347",
-  },
-  cancelTitle: {
-    marginTop: 0,
-    fontSize: "32px",
-    color: "#b42318",
-  },
-  successText: {
-    color: "#425466",
-    fontSize: "16px",
-    lineHeight: 1.6,
-  },
-  successDetails: {
-    margin: "18px 0 24px 0",
-    padding: "16px",
-    borderRadius: "14px",
-    background: "#f7fafc",
-    border: "1px solid #e1e8ef",
-    display: "grid",
-    gap: "10px",
-  },
-  lookupList: {
-    display: "grid",
-    gap: "14px",
-    marginTop: "18px",
-  },
-  lookupCard: {
-    marginTop: "18px",
-    background: "#f7fafc",
-    border: "1px solid #e1e8ef",
-    borderRadius: "16px",
-    padding: "16px",
-    display: "grid",
-    gap: "10px",
-  },
-  lookupRow: {
-    display: "flex",
     alignItems: "center",
-    gap: "8px",
-    flexWrap: "wrap",
-    color: "#102030",
-    fontSize: "14px",
+    height: "100vh",
+    background: "#0b1d2a",
   },
+
+  successCard: {
+    background: "#112b3c",
+    padding: "30px",
+    borderRadius: "12px",
+    textAlign: "center",
+  },
+
+  successTitle: {
+    color: "#4caf50",
+  },
+
+  cancelTitle: {
+    color: "#e53935",
+  },
+
+  successText: {
+    margin: "10px 0",
+  },
+
+  successDetails: {
+    textAlign: "left",
+    marginTop: "20px",
+  },
+
+  policyFooter: {
+    padding: "20px",
+    textAlign: "center",
+  },
+
+  policyText: {
+    fontSize: "12px",
+    color: "#aaa",
+  },
+}

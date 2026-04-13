@@ -150,25 +150,11 @@ function requireAdminToken(req, res, next) {
   next()
 }
 
-function getBasicAuthCredentials(req) {
-  const header = String(req.headers.authorization || "")
-  if (!header.startsWith("Basic ")) return null
-
-  try {
-    const decoded = Buffer.from(header.slice(6), "base64").toString("utf8")
-    const separatorIndex = decoded.indexOf(":")
-    if (separatorIndex === -1) return null
-
-    return {
-      username: decoded.slice(0, separatorIndex),
-      password: decoded.slice(separatorIndex + 1),
-    }
-  } catch (_err) {
-    return null
-  }
-}
-
 function requireAdminLogin(req, res, next) {
+  if (!ADMIN_PASSWORD) {
+    return res.status(500).json({ error: "ADMIN_PASSWORD is not configured on the server." })
+  }
+
   const authHeader = String(req.headers.authorization || "")
   const token = authHeader.startsWith("Bearer ")
     ? authHeader.slice(7).trim()
@@ -179,20 +165,6 @@ function requireAdminLogin(req, res, next) {
   }
 
   if (token !== ADMIN_PASSWORD) {
-    return res.status(401).json({ error: "Unauthorized" })
-  }
-
-  next()
-}
-
-  const credentials = getBasicAuthCredentials(req)
-
-  if (
-    !credentials ||
-    credentials.username !== ADMIN_USERNAME ||
-    credentials.password !== ADMIN_PASSWORD
-  ) {
-    res.setHeader("WWW-Authenticate", 'Basic realm="Cleared to Cruise Admin"')
     return res.status(401).json({ error: "Unauthorized" })
   }
 
@@ -668,6 +640,27 @@ Date: ${booking.date || "Not provided"}
 
 // normal JSON after webhook
 app.use(express.json())
+
+// -----------------------------
+// ADMIN LOGIN
+// -----------------------------
+app.post("/api/admin/login", (req, res) => {
+  const username = String(req.body?.username || "").trim()
+  const password = String(req.body?.password || "").trim()
+
+  if (!ADMIN_PASSWORD) {
+    return res.status(500).json({ error: "ADMIN_PASSWORD is not configured on the server." })
+  }
+
+  if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: "Invalid username or password." })
+  }
+
+  return res.json({
+    success: true,
+    token: ADMIN_PASSWORD,
+  })
+})
 
 // -----------------------------
 // FILES / UPLOADS
@@ -1767,7 +1760,7 @@ app.post("/api/admin/bookings/:id/deposit-link", requireAdminLogin, depositLinkH
 app.post("/api/admin/bookings/:id/send-deposit-link", requireAdminLogin, depositLinkHandler)
 
 // -----------------------------
-// ADMIN BOOKING UPDATE (EDIT DATE / TIME / DETAILS)
+// ADMIN BOOKING UPDATE
 // -----------------------------
 app.post("/api/admin/bookings/:id", requireAdminLogin, async (req, res) => {
   const id = req.params.id
@@ -1871,13 +1864,7 @@ app.post("/api/admin/pricing/holiday", requireAdminLogin, async (req, res) => {
 })
 
 app.post("/api/admin/pricing/manual", requireAdminLogin, async (req, res) => {
-  const {
-    bookingId,
-    customerEmail,
-    overrideAmount,
-    overrideType,
-    overrideLabel,
-  } = req.body
+  const { bookingId, customerEmail, overrideAmount, overrideType, overrideLabel } = req.body
 
   if (!overrideAmount || (!bookingId && !customerEmail)) {
     return res.status(400).json({
@@ -1912,7 +1899,8 @@ app.post("/api/admin/pricing/manual", requireAdminLogin, async (req, res) => {
       `,
       [
         cleanType,
-        overrideLabel || (cleanType === "manual_price" ? "Manual Price Override" : "Friends & Family"),
+        overrideLabel ||
+          (cleanType === "manual_price" ? "Manual Price Override" : "Friends & Family"),
         null,
         null,
         bookingId ? String(bookingId) : null,
@@ -1932,10 +1920,9 @@ app.post("/api/admin/pricing/manual", requireAdminLogin, async (req, res) => {
 
 app.delete("/api/admin/pricing/:id", requireAdminLogin, async (req, res) => {
   try {
-    const result = await runAsync(
-      `UPDATE pricing_overrides SET isActive = 0 WHERE id = ?`,
-      [req.params.id]
-    )
+    const result = await runAsync(`UPDATE pricing_overrides SET isActive = 0 WHERE id = ?`, [
+      req.params.id,
+    ])
 
     if (result.changes === 0) {
       return res.status(404).json({ error: "Pricing override not found." })
