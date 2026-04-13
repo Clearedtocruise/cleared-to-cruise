@@ -2564,13 +2564,12 @@ function AdminLoginCard({ onLoginSuccess }) {
     setLoading(true)
 
     try {
-      localStorage.setItem("ctc_admin_token", password.trim())
-      localStorage.setItem("ctc_admin_user", username.trim())
+      const encoded = btoa(`${username.trim()}:${password.trim()}`)
+      localStorage.setItem("ctc_admin_token", encoded)
 
       const res = await fetch(`${API}/api/admin/bookings`, {
         headers: {
-          Authorization:
-            "Basic " + btoa(`${username.trim()}:${password.trim()}`),
+          Authorization: `Basic ${encoded}`,
         },
       })
 
@@ -2590,28 +2589,48 @@ function AdminLoginCard({ onLoginSuccess }) {
   }
 
   return (
-    <form onSubmit={handleAdminLogin}>
-      <h2>Admin Login</h2>
+    <div style={styles.adminLoginWrap}>
+      <div style={styles.adminLoginCard}>
+        <h2 style={styles.adminLoginTitle}>Admin Login</h2>
+        <p style={styles.adminLoginText}>
+          Enter your admin username and password to access the Cleared to Cruise admin panel.
+        </p>
 
-      <input
-        placeholder="Username"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-      />
+        <form onSubmit={handleAdminLogin} style={styles.adminLoginForm}>
+          <label style={styles.label}>
+            Username
+            <input
+              style={styles.input}
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Admin username"
+            />
+          </label>
 
-      <input
-        type="password"
-        placeholder="Password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
+          <label style={styles.label}>
+            Password
+            <input
+              style={styles.input}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Admin password"
+            />
+          </label>
 
-      <button type="submit" disabled={loading}>
-        {loading ? "Logging in..." : "Login"}
-      </button>
+          <button
+            type="submit"
+            style={loading ? styles.buttonDisabled : styles.primaryButton}
+            disabled={loading}
+          >
+            {loading ? "Logging In..." : "Log In"}
+          </button>
+        </form>
 
-      {error && <p style={{ color: "red" }}>{error}</p>}
-    </form>
+        {error ? <div style={styles.errorBox}>{error}</div> : null}
+      </div>
+    </div>
   )
 }
 export default function App() {
