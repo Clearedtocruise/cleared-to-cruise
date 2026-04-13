@@ -1,5 +1,3 @@
-Front end 
-
 import { useEffect, useMemo, useState } from "react"
 import { BrowserRouter, Routes, Route, useParams } from "react-router-dom"
 
