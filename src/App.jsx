@@ -82,6 +82,9 @@ const heroRentalGroups = [
   },
 ]
 
+const cancellationPolicyText =
+  "Cancellation Policy: Cancellations must be made at least 7 days before the rental date or the rental payment will be forfeited. In either case, the security deposit will be returned unless the boat or equipment was used and damaged."
+
 function formatDate(value) {
   if (!value) return "—"
   return value
@@ -102,6 +105,47 @@ function getTowPrice(towValue) {
 
 function getRentalLabel(rentalValue) {
   return rentalOptions.find((item) => item.value === rentalValue)?.label || rentalValue
+}
+
+function getHolidayOrOverrideDisplay(basePrice, overridePrice) {
+  if (typeof overridePrice === "number" && overridePrice > 0) {
+    return overridePrice
+  }
+  return basePrice
+}
+
+function getStoredAdminToken() {
+  return localStorage.getItem("ctc_admin_token") || ""
+}
+
+function setStoredAdminToken(token) {
+  if (token) {
+    localStorage.setItem("ctc_admin_token", token)
+  } else {
+    localStorage.removeItem("ctc_admin_token")
+  }
+}
+
+async function adminFetch(path, options = {}) {
+  const token = getStoredAdminToken()
+  const headers = {
+    ...(options.headers || {}),
+  }
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
+  const response = await fetch(`${API}${path}`, {
+    ...options,
+    headers,
+  })
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error("ADMIN_AUTH_REQUIRED")
+  }
+
+  return response
 }
 
 function statusPillStyle(status) {
@@ -171,7 +215,7 @@ function statusPillStyle(status) {
   }
 }
 
-function BookingLookupCard() {
+function BookingLookupCard({ onLoadBooking }) {
   const [lookupBookingId, setLookupBookingId] = useState("")
   const [lookupEmail, setLookupEmail] = useState("")
   const [lookupLoading, setLookupLoading] = useState(false)
@@ -316,6 +360,16 @@ function BookingLookupCard() {
               {normalizeStatusLabel(lookupBooking.status || "new")}
             </span>
           </div>
+
+          <div style={styles.buttonRow}>
+            <button
+              type="button"
+              style={styles.primaryButton}
+              onClick={() => onLoadBooking(lookupBooking)}
+            >
+              Open This Booking
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -347,6 +401,16 @@ function BookingLookupCard() {
                   {normalizeStatusLabel(booking.paymentStatus || "unpaid")}
                 </span>
               </div>
+
+              <div style={styles.buttonRow}>
+                <button
+                  type="button"
+                  style={styles.primaryButton}
+                  onClick={() => onLoadBooking(booking)}
+                >
+                  Open This Booking
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -355,9 +419,106 @@ function BookingLookupCard() {
   )
 }
 
+function AdminLoginCard({ onLoginSuccess }) {
+  const [username, setUsername] = useState("")
+  const [password, setPassword] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  async function handleAdminLogin(e) {
+    e.preventDefault()
+    setError("")
+
+    if (!username.trim() || !password.trim()) {
+      setError("Enter your admin username and password.")
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      const res = await fetch(`${API}/api/admin/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: username.trim(),
+          password,
+        }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok || !data.token) {
+        setError(data.error || "Login failed.")
+        return
+      }
+
+      setStoredAdminToken(data.token)
+      setPassword("")
+      onLoginSuccess()
+    } catch (err) {
+      console.error(err)
+      setError("Server error during admin login.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div style={styles.adminLoginWrap}>
+      <div style={styles.adminLoginCard}>
+        <h2 style={styles.adminLoginTitle}>Admin Login</h2>
+        <p style={styles.adminLoginText}>
+          Enter your admin username and password to access the Cleared to Cruise admin panel.
+        </p>
+
+        <form onSubmit={handleAdminLogin} style={styles.adminLoginForm}>
+          <label style={styles.label}>
+            Username
+            <input
+              style={styles.input}
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Admin username"
+            />
+          </label>
+
+          <label style={styles.label}>
+            Password
+            <input
+              style={styles.input}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Admin password"
+            />
+          </label>
+
+          <button
+            type="submit"
+            style={loading ? styles.buttonDisabled : styles.primaryButton}
+            disabled={loading}
+          >
+            {loading ? "Logging In..." : "Log In"}
+          </button>
+        </form>
+
+        {error ? <div style={styles.errorBox}>{error}</div> : null}
+      </div>
+    </div>
+  )
+}
+
 function AdminPage() {
+  const [isAuthenticated, setIsAuthenticated] = useState(Boolean(getStoredAdminToken()))
+
   const [bookings, setBookings] = useState([])
   const [blockedDates, setBlockedDates] = useState([])
+  const [pricingOverrides, setPricingOverrides] = useState([])
+
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
@@ -366,19 +527,81 @@ function AdminPage() {
   const [blockReason, setBlockReason] = useState("")
   const [blockRentalLabel, setBlockRentalLabel] = useState("All Rentals")
 
+  const [holidayDate, setHolidayDate] = useState("")
+  const [holidayRentalLabel, setHolidayRentalLabel] = useState("Jet Ski (Single)")
+  const [holidayPrice, setHolidayPrice] = useState("")
+  const [holidayLabel, setHolidayLabel] = useState("Holiday Pricing")
+
+  const [discountEmail, setDiscountEmail] = useState("")
+  const [discountBookingId, setDiscountBookingId] = useState("")
+  const [discountAmount, setDiscountAmount] = useState("")
+  const [discountLabel, setDiscountLabel] = useState("Friends & Family")
+  const [discountType, setDiscountType] = useState("manual_discount")
+
+  const [editingBookingId, setEditingBookingId] = useState(null)
+  const [editDate, setEditDate] = useState("")
+  const [editTime, setEditTime] = useState("")
+  const [editRentalLabel, setEditRentalLabel] = useState("Pontoon - 6 Hours")
+  const [editTowLocation, setEditTowLocation] = useState("None")
+  const [editCustomerEmail, setEditCustomerEmail] = useState("")
+  const [editPrintedName, setEditPrintedName] = useState("")
+  const [editStatus, setEditStatus] = useState("pending_approval")
+
+  function handleAdminLogout() {
+    setStoredAdminToken("")
+    setIsAuthenticated(false)
+    setBookings([])
+    setBlockedDates([])
+    setPricingOverrides([])
+    setMessage("")
+    setError("")
+    setLoading(false)
+  }
+
+  function openEditBooking(booking) {
+    setEditingBookingId(booking.id)
+    setEditDate(booking.date || "")
+    setEditTime(booking.rentalTime || "07:00 AM")
+    setEditRentalLabel(booking.rentalLabel || "Pontoon - 6 Hours")
+    setEditTowLocation(booking.towLocation || "None")
+    setEditCustomerEmail(booking.customerEmail || "")
+    setEditPrintedName(booking.waiverPrintedName || "")
+    setEditStatus(booking.status || "pending_approval")
+    setMessage("")
+    setError("")
+  }
+
+  function cancelEditBooking() {
+    setEditingBookingId(null)
+    setEditDate("")
+    setEditTime("")
+    setEditRentalLabel("Pontoon - 6 Hours")
+    setEditTowLocation("None")
+    setEditCustomerEmail("")
+    setEditPrintedName("")
+    setEditStatus("pending_approval")
+  }
+
   async function loadAdminData() {
+    if (!isAuthenticated) {
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     setError("")
     setMessage("")
 
     try {
-      const [bookingsRes, blockedRes] = await Promise.all([
-        fetch(`${API}/api/admin/bookings`),
-        fetch(`${API}/api/admin/blocked-dates`),
+      const [bookingsRes, blockedRes, pricingRes] = await Promise.all([
+        adminFetch("/api/admin/bookings"),
+        adminFetch("/api/admin/blocked-dates"),
+        adminFetch("/api/admin/pricing-overrides"),
       ])
 
       const bookingsData = await bookingsRes.json().catch(() => [])
       const blockedData = await blockedRes.json().catch(() => [])
+      const pricingData = await pricingRes.json().catch(() => [])
 
       if (!bookingsRes.ok) {
         throw new Error(bookingsData?.error || "Could not load admin bookings.")
@@ -388,11 +611,23 @@ function AdminPage() {
         throw new Error(blockedData?.error || "Could not load blocked dates.")
       }
 
-      setBookings(Array.isArray(bookingsData) ? bookingsData : bookingsData.bookings || [])
-      setBlockedDates(Array.isArray(blockedData) ? blockedData : blockedData.blockedDates || [])
+      if (!pricingRes.ok) {
+        throw new Error(pricingData?.error || "Could not load pricing overrides.")
+      }
+
+      setBookings(Array.isArray(bookingsData) ? bookingsData : [])
+      setBlockedDates(Array.isArray(blockedData) ? blockedData : [])
+      setPricingOverrides(Array.isArray(pricingData) ? pricingData : [])
     } catch (err) {
       console.error(err)
-      setError(err.message || "Could not load admin page.")
+
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        setStoredAdminToken("")
+        setIsAuthenticated(false)
+        setError("Your admin session expired. Please log in again.")
+      } else {
+        setError(err.message || "Could not load admin page.")
+      }
     } finally {
       setLoading(false)
     }
@@ -400,14 +635,14 @@ function AdminPage() {
 
   useEffect(() => {
     loadAdminData()
-  }, [])
+  }, [isAuthenticated])
 
   async function approveBooking(id) {
     setError("")
     setMessage("Approving booking...")
 
     try {
-      const res = await fetch(`${API}/api/admin/approve/${id}`, {
+      const res = await adminFetch(`/api/admin/approve/${id}`, {
         method: "POST",
       })
 
@@ -420,10 +655,15 @@ function AdminPage() {
       }
 
       setMessage(`Booking ${id} approved.`)
-      loadAdminData()
+      await loadAdminData()
     } catch (err) {
       console.error(err)
-      setError("Server error while approving booking.")
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while approving booking.")
+      }
       setMessage("")
     }
   }
@@ -433,7 +673,7 @@ function AdminPage() {
     setMessage("Denying booking...")
 
     try {
-      const res = await fetch(`${API}/api/admin/deny/${id}`, {
+      const res = await adminFetch(`/api/admin/deny/${id}`, {
         method: "POST",
       })
 
@@ -446,10 +686,15 @@ function AdminPage() {
       }
 
       setMessage(`Booking ${id} denied.`)
-      loadAdminData()
+      await loadAdminData()
     } catch (err) {
       console.error(err)
-      setError("Server error while denying booking.")
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while denying booking.")
+      }
       setMessage("")
     }
   }
@@ -459,7 +704,7 @@ function AdminPage() {
     setMessage("Marking booking confirmed...")
 
     try {
-      const res = await fetch(`${API}/api/admin/bookings/${id}/confirm`, {
+      const res = await adminFetch(`/api/admin/bookings/${id}/confirm`, {
         method: "POST",
       })
 
@@ -472,10 +717,15 @@ function AdminPage() {
       }
 
       setMessage(`Booking ${id} marked confirmed.`)
-      loadAdminData()
+      await loadAdminData()
     } catch (err) {
       console.error(err)
-      setError("Server error while confirming booking.")
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while confirming booking.")
+      }
       setMessage("")
     }
   }
@@ -485,7 +735,7 @@ function AdminPage() {
     setMessage("Creating deposit link...")
 
     try {
-      const res = await fetch(`${API}/api/admin/deposit-link/${id}`, {
+      const res = await adminFetch(`/api/admin/deposit-link/${id}`, {
         method: "POST",
       })
 
@@ -497,313 +747,718 @@ function AdminPage() {
         return
       }
 
-      if (data.url) {
-        window.open(data.url, "_blank", "noopener,noreferrer")
-      }
-
       setMessage(`Deposit link created for booking ${id}.`)
-      loadAdminData()
+      await loadAdminData()
     } catch (err) {
       console.error(err)
-      setError("Server error while creating deposit link.")
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while creating deposit link.")
+      }
       setMessage("")
     }
   }
 
-  async function createBlockedDate() {
-    if (!blockDate) {
-      setError("Please choose a date to block.")
-      setMessage("")
-      return
-    }
-
-    setError("")
-    setMessage("Blocking date...")
-
-    try {
-      const res = await fetch(`${API}/api/admin/block-date`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          date: blockDate,
-          reason: blockReason.trim(),
-          rentalLabel: blockRentalLabel === "All Rentals" ? null : blockRentalLabel,
-        }),
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        setError(data.error || "Could not block date.")
-        setMessage("")
-        return
-      }
-
-      setMessage("Date blocked successfully.")
-      setBlockDate("")
-      setBlockReason("")
-      setBlockRentalLabel("All Rentals")
-      loadAdminData()
-    } catch (err) {
-      console.error(err)
-      setError("Server error while blocking date.")
-      setMessage("")
-    }
-  }
-
-  async function removeBlockedDate(id) {
-    setError("")
-    setMessage("Removing blocked date...")
-
-    try {
-      const res = await fetch(`${API}/api/admin/block-date/${id}`, {
-        method: "DELETE",
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        setError(data.error || "Could not remove blocked date.")
-        setMessage("")
-        return
-      }
-
-      setMessage("Blocked date removed.")
-      loadAdminData()
-    } catch (err) {
-      console.error(err)
-      setError("Server error while removing blocked date.")
-      setMessage("")
-    }
+  if (!isAuthenticated) {
+    return <AdminLoginCard onLoginSuccess={() => setIsAuthenticated(true)} />
   }
 
   return (
     <div style={styles.adminPage}>
-      <div style={styles.adminShell}>
-        <div style={styles.adminTopBar}>
-          <div>
-            <h1 style={styles.adminTitle}>Cleared to Cruise Admin</h1>
-            <p style={styles.adminSubtitle}>
-              Approve or deny bookings, review waivers, and block dates for weather or maintenance.
-            </p>
-          </div>
+      <div style={styles.adminHeader}>
+        <h1 style={styles.adminTitle}>Cleared to Cruise Admin</h1>
 
-          <div style={styles.adminTopButtons}>
-            <button type="button" style={styles.secondaryButton} onClick={loadAdminData}>
-              Refresh Admin
-            </button>
+        <div style={styles.buttonRow}>
+          <button style={styles.secondaryButton} onClick={loadAdminData}>
+            Refresh
+          </button>
 
-            <button
-              type="button"
-              style={styles.primaryButton}
-              onClick={() => {
-                window.location.href = "/"
-              }}
-            >
-              Return to Site
-            </button>
-          </div>
+          <button style={styles.dangerButton} onClick={handleAdminLogout}>
+            Log Out
+          </button>
         </div>
+      </div>
 
-        {message ? <div style={styles.successBox}>{message}</div> : null}
-        {error ? <div style={styles.errorBox}>{error}</div> : null}
+      {message ? <div style={styles.successBox}>{message}</div> : null}
+      {error ? <div style={styles.errorBox}>{error}</div> : null}
 
+      {loading ? (
+        <div style={styles.loadingBox}>Loading admin data...</div>
+      ) : null}
+
+      {/* ---------------- BOOKINGS ---------------- */}
+      <section style={styles.adminSection}>
+        <h2 style={styles.sectionTitle}>Bookings</h2>
+
+        <div style={styles.tableWrap}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Rental</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Status</th>
+                <th>Payment</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {bookings.map((b) => (
+                <tr key={b.id}>
+                  <td>{b.id}</td>
+                  <td>{b.rentalLabel}</td>
+                  <td>{formatDate(b.date)}</td>
+                  <td>{b.rentalTime || "—"}</td>
+
+                  <td>
+                    <span style={statusPillStyle(b.status)}>
+                      {normalizeStatusLabel(b.status)}
+                    </span>
+                  </td>
+
+                  <td>
+                    <span style={statusPillStyle(b.paymentStatus)}>
+                      {normalizeStatusLabel(b.paymentStatus)}
+                    </span>
+                  </td>
+
+                  <td>
+                    <div style={styles.actionWrap}>
+                      <button
+                        style={styles.smallButton}
+                        onClick={() => approveBooking(b.id)}
+                      >
+                        Approve
+                      </button>
+
+                      <button
+                        style={styles.smallButton}
+                        onClick={() => denyBooking(b.id)}
+                      >
+                        Deny
+                      </button>
+
+                      <button
+                        style={styles.smallButton}
+                        onClick={() => markConfirmed(b.id)}
+                      >
+                        Confirm
+                      </button>
+
+                      <button
+                        style={styles.smallButton}
+                        onClick={() => sendDepositLink(b.id)}
+                      >
+                        Deposit
+                      </button>
+
+                      <button
+                        style={styles.secondaryButton}
+                        onClick={() => openEditBooking(b)}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* ---------------- EDIT BOOKING ---------------- */}
+      {editingBookingId ? (
         <section style={styles.adminSection}>
-          <div style={styles.adminSectionHeader}>
-            <div>
-              <h2 style={styles.adminSectionTitle}>Block a Date</h2>
-              <p style={styles.adminSectionText}>
-                Use this for maintenance, bad weather, or manual blackout dates.
-              </p>
-            </div>
-          </div>
+          <h2 style={styles.sectionTitle}>
+            Edit Booking #{editingBookingId}
+          </h2>
 
-          <div style={styles.adminBlockGrid}>
+          <div style={styles.formGrid}>
             <label style={styles.label}>
               Date
               <input
-                type="date"
                 style={styles.input}
-                value={blockDate}
-                onChange={(e) => setBlockDate(e.target.value)}
+                type="date"
+                value={editDate}
+                onChange={(e) => setEditDate(e.target.value)}
               />
             </label>
 
             <label style={styles.label}>
-              Rental Type
+              Time
               <select
                 style={styles.input}
-                value={blockRentalLabel}
-                onChange={(e) => setBlockRentalLabel(e.target.value)}
+                value={editTime}
+                onChange={(e) => setEditTime(e.target.value)}
               >
-                <option>All Rentals</option>
-                {rentalOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.value}
+                {timeOptions.map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
+              </select>
+            </label>
+
+            <label style={styles.label}>
+              Rental
+              <select
+                style={styles.input}
+                value={editRentalLabel}
+                onChange={(e) => setEditRentalLabel(e.target.value)}
+              >
+                {rentalOptions.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
                   </option>
                 ))}
               </select>
             </label>
 
             <label style={styles.label}>
-              Reason
-              <input
-                type="text"
+              Tow Location
+              <select
                 style={styles.input}
-                placeholder="Maintenance, weather, unavailable, etc."
-                value={blockReason}
-                onChange={(e) => setBlockReason(e.target.value)}
+                value={editTowLocation}
+                onChange={(e) => setEditTowLocation(e.target.value)}
+              >
+                {towOptions.map((t) => (
+                  <option key={t.value}>{t.value}</option>
+                ))}
+              </select>
+            </label>
+
+            <label style={styles.label}>
+              Customer Email
+              <input
+                style={styles.input}
+                value={editCustomerEmail}
+                onChange={(e) => setEditCustomerEmail(e.target.value)}
               />
             </label>
 
-            <div style={styles.adminBlockAction}>
-              <button type="button" style={styles.primaryButton} onClick={createBlockedDate}>
-                Block Date
-              </button>
-            </div>
+            <label style={styles.label}>
+              Name
+              <input
+                style={styles.input}
+                value={editPrintedName}
+                onChange={(e) => setEditPrintedName(e.target.value)}
+              />
+            </label>
+
+            <label style={styles.label}>
+              Status
+              <select
+                style={styles.input}
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value)}
+              >
+                <option value="pending_approval">Pending</option>
+                <option value="approved_unpaid">Approved</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="denied">Denied</option>
+              </select>
+            </label>
+          </div>
+
+          <div style={styles.buttonRow}>
+            <button
+              style={styles.primaryButton}
+              onClick={async () => {
+                try {
+                  const res = await adminFetch(
+                    `/api/admin/bookings/${editingBookingId}`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        date: editDate,
+                        rentalTime: editTime,
+                        rentalLabel: editRentalLabel,
+                        towLocation: editTowLocation,
+                        customerEmail: editCustomerEmail,
+                        waiverPrintedName: editPrintedName,
+                        status: editStatus,
+                      }),
+                    }
+                  )
+
+                  if (!res.ok) throw new Error()
+
+                  setMessage("Booking updated.")
+                  cancelEditBooking()
+                  loadAdminData()
+                } catch {
+                  setError("Failed to update booking.")
+                }
+              }}
+            >
+              Save Changes
+            </button>
+
+            <button style={styles.secondaryButton} onClick={cancelEditBooking}>
+              Cancel
+            </button>
           </div>
         </section>
+      ) : null}
 
-        <section style={styles.adminSection}>
-          <div style={styles.adminSectionHeader}>
-            <div>
-              <h2 style={styles.adminSectionTitle}>Blocked Dates</h2>
-              <p style={styles.adminSectionText}>Current manual blocks in the system.</p>
-            </div>
-          </div>
+      {/* ---------------- HOLIDAY PRICING ---------------- */}
+      <section style={styles.adminSection}>
+        <h2 style={styles.sectionTitle}>Holiday Pricing</h2>
 
-          {loading ? (
-            <div style={styles.infoBox}>Loading blocked dates...</div>
-          ) : blockedDates.length === 0 ? (
-            <div style={styles.infoBox}>No blocked dates found.</div>
-          ) : (
-            <div style={styles.adminList}>
-              {blockedDates.map((item) => (
-                <div key={item.id} style={styles.adminListCard}>
-                  <div style={styles.adminListMain}>
-                    <div style={styles.adminListTitle}>{item.date}</div>
-                    <div style={styles.adminListMeta}>{item.rentalLabel || "All Rentals"}</div>
-                    <div style={styles.adminListReason}>{item.reason || "No reason entered"}</div>
-                  </div>
+        <div style={styles.formGrid}>
+          <label style={styles.label}>
+            Holiday Date
+            <input
+              style={styles.input}
+              type="date"
+              value={holidayDate}
+              onChange={(e) => setHolidayDate(e.target.value)}
+            />
+          </label>
 
+          <label style={styles.label}>
+            Rental Type
+            <select
+              style={styles.input}
+              value={holidayRentalLabel}
+              onChange={(e) => setHolidayRentalLabel(e.target.value)}
+            >
+              {rentalOptions.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={styles.label}>
+            Holiday Price
+            <input
+              style={styles.input}
+              type="number"
+              placeholder="950"
+              value={holidayPrice}
+              onChange={(e) => setHolidayPrice(e.target.value)}
+            />
+          </label>
+
+          <label style={styles.label}>
+            Label
+            <input
+              style={styles.input}
+              type="text"
+              value={holidayLabel}
+              onChange={(e) => setHolidayLabel(e.target.value)}
+            />
+          </label>
+        </div>
+
+        <div style={styles.buttonRow}>
+          <button
+            style={styles.primaryButton}
+            onClick={async () => {
+              setError("")
+              setMessage("Saving holiday pricing...")
+
+              try {
+                const res = await adminFetch("/api/admin/pricing/holiday", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    date: holidayDate,
+                    rentalLabel: holidayRentalLabel,
+                    overrideAmount: holidayPrice,
+                    overrideLabel: holidayLabel,
+                  }),
+                })
+
+                const data = await res.json().catch(() => ({}))
+
+                if (!res.ok) {
+                  setError(data.error || "Could not save holiday pricing.")
+                  setMessage("")
+                  return
+                }
+
+                setMessage("Holiday pricing saved.")
+                setHolidayDate("")
+                setHolidayPrice("")
+                setHolidayLabel("Holiday Pricing")
+                await loadAdminData()
+              } catch (err) {
+                console.error(err)
+                if (err.message === "ADMIN_AUTH_REQUIRED") {
+                  handleAdminLogout()
+                  setError("Please log in again.")
+                } else {
+                  setError("Server error while saving holiday pricing.")
+                }
+                setMessage("")
+              }
+            }}
+          >
+            Save Holiday Price
+          </button>
+        </div>
+      </section>
+
+      {/* ---------------- MANUAL PRICING / FRIENDS & FAMILY ---------------- */}
+      <section style={styles.adminSection}>
+        <h2 style={styles.sectionTitle}>Manual Pricing / Friends & Family</h2>
+
+        <div style={styles.formGrid}>
+          <label style={styles.label}>
+            Booking ID
+            <input
+              style={styles.input}
+              type="text"
+              placeholder="1001"
+              value={discountBookingId}
+              onChange={(e) => setDiscountBookingId(e.target.value)}
+            />
+          </label>
+
+          <label style={styles.label}>
+            Customer Email
+            <input
+              style={styles.input}
+              type="email"
+              placeholder="customer@email.com"
+              value={discountEmail}
+              onChange={(e) => setDiscountEmail(e.target.value)}
+            />
+          </label>
+
+          <label style={styles.label}>
+            Type
+            <select
+              style={styles.input}
+              value={discountType}
+              onChange={(e) => setDiscountType(e.target.value)}
+            >
+              <option value="manual_discount">Manual Discount</option>
+              <option value="manual_price">Manual Price Override</option>
+            </select>
+          </label>
+
+          <label style={styles.label}>
+            Amount
+            <input
+              style={styles.input}
+              type="number"
+              placeholder="100"
+              value={discountAmount}
+              onChange={(e) => setDiscountAmount(e.target.value)}
+            />
+          </label>
+
+          <label style={styles.label}>
+            Label
+            <input
+              style={styles.input}
+              type="text"
+              value={discountLabel}
+              onChange={(e) => setDiscountLabel(e.target.value)}
+            />
+          </label>
+        </div>
+
+        <div style={styles.buttonRow}>
+          <button
+            style={styles.primaryButton}
+            onClick={async () => {
+              setError("")
+              setMessage("Saving manual pricing override...")
+
+              try {
+                const res = await adminFetch("/api/admin/pricing/manual", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    bookingId: discountBookingId.trim(),
+                    customerEmail: discountEmail.trim(),
+                    overrideAmount: discountAmount,
+                    overrideType: discountType,
+                    overrideLabel: discountLabel,
+                  }),
+                })
+
+                const data = await res.json().catch(() => ({}))
+
+                if (!res.ok) {
+                  setError(data.error || "Could not save manual pricing override.")
+                  setMessage("")
+                  return
+                }
+
+                setMessage("Manual pricing override saved.")
+                setDiscountBookingId("")
+                setDiscountEmail("")
+                setDiscountAmount("")
+                setDiscountLabel("Friends & Family")
+                setDiscountType("manual_discount")
+                await loadAdminData()
+              } catch (err) {
+                console.error(err)
+                if (err.message === "ADMIN_AUTH_REQUIRED") {
+                  handleAdminLogout()
+                  setError("Please log in again.")
+                } else {
+                  setError("Server error while saving manual pricing override.")
+                }
+                setMessage("")
+              }
+            }}
+          >
+            Save Manual Pricing
+          </button>
+        </div>
+      </section>
+
+      {/* ---------------- BLOCKED DATES ---------------- */}
+      <section style={styles.adminSection}>
+        <h2 style={styles.sectionTitle}>Block a Date</h2>
+
+        <div style={styles.formGrid}>
+          <label style={styles.label}>
+            Date
+            <input
+              style={styles.input}
+              type="date"
+              value={blockDate}
+              onChange={(e) => setBlockDate(e.target.value)}
+            />
+          </label>
+
+          <label style={styles.label}>
+            Rental Type
+            <select
+              style={styles.input}
+              value={blockRentalLabel}
+              onChange={(e) => setBlockRentalLabel(e.target.value)}
+            >
+              <option value="All Rentals">All Rentals</option>
+              {rentalOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.value}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={styles.label}>
+            Reason
+            <input
+              style={styles.input}
+              type="text"
+              placeholder="Maintenance, weather, unavailable"
+              value={blockReason}
+              onChange={(e) => setBlockReason(e.target.value)}
+            />
+          </label>
+        </div>
+
+        <div style={styles.buttonRow}>
+          <button
+            style={styles.primaryButton}
+            onClick={async () => {
+              if (!blockDate) {
+                setError("Please choose a date to block.")
+                setMessage("")
+                return
+              }
+
+              setError("")
+              setMessage("Blocking date...")
+
+              try {
+                const res = await adminFetch("/api/admin/block-date", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    date: blockDate,
+                    reason: blockReason.trim(),
+                    rentalLabel: blockRentalLabel === "All Rentals" ? null : blockRentalLabel,
+                  }),
+                })
+
+                const data = await res.json().catch(() => ({}))
+
+                if (!res.ok) {
+                  setError(data.error || "Could not block date.")
+                  setMessage("")
+                  return
+                }
+
+                setMessage("Date blocked successfully.")
+                setBlockDate("")
+                setBlockReason("")
+                setBlockRentalLabel("All Rentals")
+                await loadAdminData()
+              } catch (err) {
+                console.error(err)
+                if (err.message === "ADMIN_AUTH_REQUIRED") {
+                  handleAdminLogout()
+                  setError("Please log in again.")
+                } else {
+                  setError("Server error while blocking date.")
+                }
+                setMessage("")
+              }
+            }}
+          >
+            Block Date
+          </button>
+        </div>
+      </section>
+
+      {/* ---------------- ACTIVE PRICING OVERRIDES ---------------- */}
+      <section style={styles.adminSection}>
+        <h2 style={styles.sectionTitle}>Active Pricing Overrides</h2>
+
+        {pricingOverrides.length === 0 ? (
+          <div style={styles.infoBox}>No active pricing overrides found.</div>
+        ) : (
+          <div style={styles.lookupList}>
+            {pricingOverrides.map((item) => (
+              <div key={item.id} style={styles.lookupCard}>
+                <div style={styles.lookupRow}>
+                  <strong>ID:</strong> {item.id}
+                </div>
+                <div style={styles.lookupRow}>
+                  <strong>Type:</strong> {normalizeStatusLabel(item.overrideType)}
+                </div>
+                <div style={styles.lookupRow}>
+                  <strong>Label:</strong> {item.overrideLabel || "—"}
+                </div>
+                <div style={styles.lookupRow}>
+                  <strong>Rental:</strong> {item.rentalLabel || "—"}
+                </div>
+                <div style={styles.lookupRow}>
+                  <strong>Date:</strong> {item.date || "—"}
+                </div>
+                <div style={styles.lookupRow}>
+                  <strong>Booking ID:</strong> {item.bookingId || "—"}
+                </div>
+                <div style={styles.lookupRow}>
+                  <strong>Email:</strong> {item.customerEmail || "—"}
+                </div>
+                <div style={styles.lookupRow}>
+                  <strong>Amount:</strong>{" "}
+                  ${typeof item.overrideAmount === "number" ? (item.overrideAmount / 100).toFixed(2) : "0.00"}
+                </div>
+
+                <div style={styles.buttonRow}>
                   <button
                     type="button"
                     style={styles.dangerButton}
-                    onClick={() => removeBlockedDate(item.id)}
+                    onClick={async () => {
+                      setError("")
+                      setMessage("Removing pricing override...")
+
+                      try {
+                        const res = await adminFetch(`/api/admin/pricing/${item.id}`, {
+                          method: "DELETE",
+                        })
+
+                        const data = await res.json().catch(() => ({}))
+
+                        if (!res.ok) {
+                          setError(data.error || "Could not remove pricing override.")
+                          setMessage("")
+                          return
+                        }
+
+                        setMessage("Pricing override removed.")
+                        await loadAdminData()
+                      } catch (err) {
+                        console.error(err)
+                        if (err.message === "ADMIN_AUTH_REQUIRED") {
+                          handleAdminLogout()
+                          setError("Please log in again.")
+                        } else {
+                          setError("Server error while removing pricing override.")
+                        }
+                        setMessage("")
+                      }
+                    }}
                   >
-                    Remove
+                    Remove Override
                   </button>
                 </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section style={styles.adminSection}>
-          <div style={styles.adminSectionHeader}>
-            <div>
-              <h2 style={styles.adminSectionTitle}>Bookings</h2>
-              <p style={styles.adminSectionText}>
-                Review requests, waiver status, payment status, and deposit actions.
-              </p>
-            </div>
+              </div>
+            ))}
           </div>
+        )}
+      </section>
 
-          {loading ? (
-            <div style={styles.infoBox}>Loading bookings...</div>
-          ) : bookings.length === 0 ? (
-            <div style={styles.infoBox}>No bookings found.</div>
-          ) : (
-            <div style={styles.bookingTableWrap}>
-              <table style={styles.bookingTable}>
-                <thead>
-                  <tr>
-                    <th style={styles.th}>Booking ID</th>
-                    <th style={styles.th}>Customer</th>
-                    <th style={styles.th}>Rental</th>
-                    <th style={styles.th}>Date</th>
-                    <th style={styles.th}>Time</th>
-                    <th style={styles.th}>Tow</th>
-                    <th style={styles.th}>Waiver</th>
-                    <th style={styles.th}>Payment</th>
-                    <th style={styles.th}>Status</th>
-                    <th style={styles.th}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bookings.map((booking) => (
-                    <tr key={booking.id} style={styles.tr}>
-                      <td style={styles.td}>{booking.id}</td>
-                      <td style={styles.td}>
-                        <div style={styles.customerCell}>
-                          <strong>{booking.waiverPrintedName || "No name"}</strong>
-                          <span>{booking.customerEmail || "No email"}</span>
-                        </div>
-                      </td>
-                      <td style={styles.td}>{booking.rentalLabel || "—"}</td>
-                      <td style={styles.td}>{formatDate(booking.date)}</td>
-                      <td style={styles.td}>{booking.rentalTime || "—"}</td>
-                      <td style={styles.td}>{booking.towLocation || "None"}</td>
-                      <td style={styles.td}>
-                        <span style={statusPillStyle(booking.waiverStatus || "not_started")}>
-                          {normalizeStatusLabel(booking.waiverStatus || "not_started")}
-                        </span>
-                      </td>
-                      <td style={styles.td}>
-                        <span style={statusPillStyle(booking.paymentStatus || "unpaid")}>
-                          {normalizeStatusLabel(booking.paymentStatus || "unpaid")}
-                        </span>
-                      </td>
-                      <td style={styles.td}>
-                        <span style={statusPillStyle(booking.status || "new")}>
-                          {normalizeStatusLabel(booking.status || "new")}
-                        </span>
-                      </td>
-                      <td style={styles.td}>
-                        <div style={styles.actionsCell}>
-                          <button
-                            type="button"
-                            style={styles.smallApproveButton}
-                            onClick={() => approveBooking(booking.id)}
-                          >
-                            Approve
-                          </button>
+      {/* ---------------- BLOCKED DATE LIST ---------------- */}
+      <section style={styles.adminSection}>
+        <h2 style={styles.sectionTitle}>Blocked Dates</h2>
 
-                          <button
-                            type="button"
-                            style={styles.smallDenyButton}
-                            onClick={() => denyBooking(booking.id)}
-                          >
-                            Deny
-                          </button>
+        {blockedDates.length === 0 ? (
+          <div style={styles.infoBox}>No blocked dates found.</div>
+        ) : (
+          <div style={styles.lookupList}>
+            {blockedDates.map((item) => (
+              <div key={item.id} style={styles.lookupCard}>
+                <div style={styles.lookupRow}>
+                  <strong>Date:</strong> {item.date}
+                </div>
+                <div style={styles.lookupRow}>
+                  <strong>Rental:</strong> {item.rentalLabel || "All Rentals"}
+                </div>
+                <div style={styles.lookupRow}>
+                  <strong>Reason:</strong> {item.reason || "—"}
+                </div>
 
-                          <button
-                            type="button"
-                            style={styles.smallNeutralButton}
-                            onClick={() => markConfirmed(booking.id)}
-                          >
-                            Confirm
-                          </button>
+                <div style={styles.buttonRow}>
+                  <button
+                    type="button"
+                    style={styles.dangerButton}
+                    onClick={async () => {
+                      setError("")
+                      setMessage("Removing blocked date...")
 
-                          <button
-                            type="button"
-                            style={styles.smallNeutralButton}
-                            onClick={() => sendDepositLink(booking.id)}
-                          >
-                            Deposit Link
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      </div>
+                      try {
+                        const res = await adminFetch(`/api/admin/block-date/${item.id}`, {
+                          method: "DELETE",
+                        })
+
+                        const data = await res.json().catch(() => ({}))
+
+                        if (!res.ok) {
+                          setError(data.error || "Could not remove blocked date.")
+                          setMessage("")
+                          return
+                        }
+
+                        setMessage("Blocked date removed.")
+                        await loadAdminData()
+                      } catch (err) {
+                        console.error(err)
+                        if (err.message === "ADMIN_AUTH_REQUIRED") {
+                          handleAdminLogout()
+                          setError("Please log in again.")
+                        } else {
+                          setError("Server error while removing blocked date.")
+                        }
+                        setMessage("")
+                      }
+                    }}
+                  >
+                    Remove Block
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   )
 }
@@ -1009,7 +1664,8 @@ function MainApp() {
 
   const rentalPrice = useMemo(() => getRentalPrice(rental), [rental])
   const towPrice = useMemo(() => getTowPrice(location), [location])
-  const totalAmount = useMemo(() => rentalPrice + towPrice, [rentalPrice, towPrice])
+  const displayRentalPrice = useMemo(() => getHolidayOrOverrideDisplay(rentalPrice), [rentalPrice])
+  const totalAmount = useMemo(() => displayRentalPrice + towPrice, [displayRentalPrice, towPrice])
 
   function resetBookingForm() {
     setBookingId(null)
@@ -1026,6 +1682,233 @@ function MainApp() {
     setFile(null)
     setShowWaiver(false)
     setWaiverAccepted(false)
+  }
+
+  function loadExistingBookingIntoForm(booking) {
+    setBookingId(booking.id || null)
+    setBookingStatus(booking.status || "new")
+    setWaiverStatus(booking.waiverStatus || "not_started")
+    setRental(booking.rentalLabel || "Pontoon - 6 Hours")
+    setDate(booking.date || "")
+    setRentalTime(booking.rentalTime || "07:00 AM")
+    setLocation(booking.towLocation || "None")
+    setName(booking.waiverPrintedName || "")
+    setEmail(booking.customerEmail || "")
+    setAvailabilityMessage("")
+
+    if ((booking.waiverStatus || "not_started") !== "signed" && booking.status === "approved_unpaid") {
+      setStatusMessage("This booking is approved. Please sign the waiver below, then you can pay.")
+    } else if ((booking.waiverStatus || "not_started") !== "signed") {
+      setStatusMessage("Booking loaded. Please sign the waiver below to continue.")
+    } else if (booking.status === "approved_unpaid") {
+      setStatusMessage("Booking loaded. Your waiver is signed and payment is ready.")
+    } else {
+      setStatusMessage("Booking loaded. You can continue below.")
+    }
+
+    if ((booking.waiverStatus || "not_started") !== "signed") {
+      setShowWaiver(true)
+      setWaiverAccepted(false)
+    } else {
+      setShowWaiver(false)
+      setWaiverAccepted(true)
+    }
+  }
+
+  async function checkAvailability(selectedDate = date, selectedRental = rental) {
+    if (!selectedDate) {
+      setAvailabilityMessage("")
+      return
+    }
+
+    try {
+      const res = await fetch(
+        `${API}/api/availability?rentalLabel=${encodeURIComponent(selectedRental)}&date=${selectedDate}`
+      )
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setAvailabilityMessage(data.error || "Could not check availability.")
+        return
+      }
+
+      if (data.available) {
+        setAvailabilityMessage("✅ Available")
+      } else {
+        setAvailabilityMessage("❌ Not available")
+      }
+    } catch (err) {
+      console.error(err)
+      setAvailabilityMessage("Error checking availability.")
+    }
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+
+    if (!date) {
+      setAvailabilityMessage("Please choose a date.")
+      return
+    }
+
+    if (!name) {
+      setStatusMessage("Please enter your name.")
+      return
+    }
+
+    if (!file) {
+      setStatusMessage("Please upload your photo ID.")
+      return
+    }
+
+    if (!waiverAccepted) {
+      setStatusMessage("You must accept the waiver before continuing.")
+      return
+    }
+
+    setLoading(true)
+    setStatusMessage("Submitting booking request...")
+
+    try {
+      const formData = new FormData()
+      formData.append("rentalLabel", rental)
+      formData.append("date", date)
+      formData.append("rentalTime", rentalTime)
+      formData.append("towLocation", location)
+      formData.append("waiverPrintedName", name)
+      formData.append("waiverAccepted", waiverAccepted)
+      formData.append("customerEmail", email)
+      formData.append("photoId", file)
+
+      const res = await fetch(`${API}/api/bookings/waiver`, {
+        method: "POST",
+        body: formData,
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setStatusMessage(data.error || "Booking failed.")
+        setLoading(false)
+        return
+      }
+
+      setBookingId(data.bookingId)
+      setBookingStatus("pending_approval")
+      setWaiverStatus("signed")
+      setShowWaiver(false)
+
+      setStatusMessage(
+        `Booking submitted! ID: ${data.bookingId}. Awaiting admin approval.`
+      )
+    } catch (error) {
+      console.error(error)
+      setStatusMessage("Server error submitting booking.")
+    }
+
+    setLoading(false)
+  }
+
+  async function handleSignWaiver() {
+    if (!bookingId) {
+      setStatusMessage("No booking found to sign waiver.")
+      return
+    }
+
+    try {
+      const res = await fetch(`${API}/api/waiver/signed/${bookingId}`, {
+        method: "POST",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setStatusMessage(data.error || "Failed to sign waiver.")
+        return
+      }
+
+      setWaiverStatus("signed")
+      setShowWaiver(false)
+      setWaiverAccepted(true)
+
+      setStatusMessage("Waiver signed successfully.")
+    } catch (error) {
+      console.error(error)
+      setStatusMessage("Server error signing waiver.")
+    }
+  }
+
+  async function handlePay() {
+    if (!bookingId) {
+      setStatusMessage("No booking found.")
+      return
+    }
+
+    setPaying(true)
+    setStatusMessage("Redirecting to payment...")
+
+    try {
+      const res = await fetch(`${API}/api/create-checkout/${bookingId}`, {
+        method: "POST",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setStatusMessage(data.error || "Payment failed.")
+        setPaying(false)
+        return
+      }
+
+      if (data.url) {
+        window.location.href = data.url
+        return
+      }
+
+      setStatusMessage("Payment link not returned.")
+    } catch (error) {
+      console.error(error)
+      setStatusMessage("Server error during payment.")
+    }
+
+    setPaying(false)
+  }
+
+  async function refreshBookingStatus() {
+    if (!bookingId) {
+      setStatusMessage("Enter or load a booking first.")
+      return
+    }
+
+    try {
+      const res = await fetch(`${API}/api/bookings/${bookingId}`)
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setStatusMessage(data.error || "Could not refresh booking status.")
+        return
+      }
+
+      setBookingStatus(data.status || "new")
+      setWaiverStatus(data.waiverStatus || "not_started")
+
+      if (data.status === "approved_unpaid" && (data.waiverStatus || "not_started") !== "signed") {
+        setShowWaiver(true)
+        setStatusMessage("Approved. Please sign the waiver to continue.")
+      } else if (data.status === "approved_unpaid") {
+        setStatusMessage("Approved. You can now pay.")
+      } else if (data.status === "confirmed") {
+        setStatusMessage("Booking confirmed.")
+      } else if (data.status === "denied") {
+        setStatusMessage("Booking was denied.")
+      } else {
+        setStatusMessage(`Booking status: ${normalizeStatusLabel(data.status || "new")}`)
+      }
+    } catch (error) {
+      console.error(error)
+      setStatusMessage("Server error while refreshing booking.")
+    }
   }
 
   useEffect(() => {
@@ -1076,221 +1959,6 @@ function MainApp() {
         return ""
     }
   }, [rental])
-
-  async function reserveSpotAndContinue() {
-    if (!date) {
-      setAvailabilityMessage("Please choose a rental date.")
-      setStatusMessage("")
-      return
-    }
-
-    if (!rentalTime) {
-      setStatusMessage("Please choose a requested rental time.")
-      setAvailabilityMessage("")
-      return
-    }
-
-    if (!email.trim()) {
-      setStatusMessage("Please enter your email address.")
-      setAvailabilityMessage("")
-      return
-    }
-
-    if (!name.trim()) {
-      setStatusMessage("Please enter your full legal name for the waiver.")
-      setAvailabilityMessage("")
-      return
-    }
-
-    if (!file) {
-      setStatusMessage("Please upload a photo ID before continuing.")
-      setAvailabilityMessage("")
-      return
-    }
-
-    setLoading(true)
-    setAvailabilityMessage("")
-    setStatusMessage("")
-
-    try {
-      const availabilityRes = await fetch(
-        `${API}/api/availability?rentalLabel=${encodeURIComponent(rental)}&date=${encodeURIComponent(date)}`
-      )
-
-      const availabilityData = await availabilityRes.json().catch(() => ({}))
-
-      if (!availabilityRes.ok) {
-        setAvailabilityMessage(availabilityData.error || "Could not check availability.")
-        return
-      }
-
-      if (!availabilityData.available) {
-        setAvailabilityMessage("That rental is not available for the selected date.")
-        return
-      }
-
-      setAvailabilityMessage("Date is available. Saving your request...")
-
-      const formData = new FormData()
-      formData.append("rentalLabel", rental)
-      formData.append("date", date)
-      formData.append("rentalTime", rentalTime)
-      formData.append("towLocation", location)
-      formData.append("waiverPrintedName", name.trim())
-      formData.append("waiverAccepted", "false")
-      formData.append("customerEmail", email.trim())
-      formData.append("photoId", file)
-
-      const bookingRes = await fetch(`${API}/api/bookings/waiver`, {
-        method: "POST",
-        body: formData,
-      })
-
-      const bookingData = await bookingRes.json().catch(() => ({}))
-
-      if (!bookingRes.ok) {
-        setStatusMessage(bookingData.error || "Could not save booking request.")
-        return
-      }
-
-      setBookingId(bookingData.bookingId)
-      setBookingStatus("pending_approval")
-      setWaiverStatus("not_started")
-      setShowWaiver(true)
-      setWaiverAccepted(false)
-      setStatusMessage(
-        `Request submitted. Booking ID: ${bookingData.bookingId}. Please review and sign the waiver.`
-      )
-    } catch (error) {
-      console.error(error)
-      setStatusMessage("Server error while saving booking request.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function signWaiver() {
-    if (!bookingId) {
-      setStatusMessage("Please reserve the booking first.")
-      return
-    }
-
-    if (!name.trim()) {
-      setStatusMessage("Please enter your full legal name.")
-      return
-    }
-
-    if (!waiverAccepted) {
-      setStatusMessage("You must agree to the liability waiver before signing.")
-      return
-    }
-
-    setStatusMessage("Signing waiver...")
-
-    try {
-      const res = await fetch(`${API}/api/waiver/signed/${bookingId}`, {
-        method: "POST",
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        setStatusMessage(data.error || "Could not mark waiver as signed.")
-        return
-      }
-
-      setWaiverStatus("signed")
-      setShowWaiver(false)
-      setStatusMessage(
-        "Waiver signed successfully. Your request is pending approval. Once approved, payment can be completed."
-      )
-    } catch (error) {
-      console.error(error)
-      setStatusMessage("Server error while signing waiver.")
-    }
-  }
-
-  async function refreshBookingStatus() {
-    if (!bookingId) {
-      setStatusMessage("No booking found yet.")
-      return
-    }
-
-    setStatusMessage("Checking booking approval status...")
-
-    try {
-      const res = await fetch(`${API}/api/bookings/${bookingId}`)
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        setStatusMessage(data.error || "Could not check booking status.")
-        return
-      }
-
-      setBookingStatus(data.status || "new")
-      setWaiverStatus(data.waiverStatus || "not_started")
-
-      if (data.status === "approved_unpaid") {
-        setStatusMessage("Your rental request has been approved. You can now complete payment.")
-      } else if (data.status === "pending_approval") {
-        setStatusMessage("Your rental request is still pending approval.")
-      } else if (data.status === "confirmed") {
-        setStatusMessage("Your booking is already confirmed.")
-      } else if (data.status === "denied") {
-        setStatusMessage("Your requested rental was not approved.")
-      } else {
-        setStatusMessage(`Current booking status: ${data.status}`)
-      }
-    } catch (error) {
-      console.error(error)
-      setStatusMessage("Server error while checking booking status.")
-    }
-  }
-
-  async function payNow() {
-    if (!bookingId) {
-      setStatusMessage("No booking found yet.")
-      return
-    }
-
-    if (waiverStatus !== "signed") {
-      setStatusMessage("Waiver must be signed before payment.")
-      return
-    }
-
-    if (bookingStatus !== "approved_unpaid") {
-      setStatusMessage("Booking must be approved before payment.")
-      return
-    }
-
-    setPaying(true)
-    setStatusMessage("Creating secure checkout session...")
-
-    try {
-      const res = await fetch(`${API}/api/create-checkout/${bookingId}`, {
-        method: "POST",
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        setStatusMessage(data.error || "Could not create checkout session.")
-        return
-      }
-
-      if (!data.url) {
-        setStatusMessage("Checkout link was not returned.")
-        return
-      }
-
-      window.location.href = data.url
-    } catch (error) {
-      console.error(error)
-      setStatusMessage("Server error while creating checkout session.")
-    } finally {
-      setPaying(false)
-    }
-  }
 
   if (path === "/admin") {
     return <AdminPage />
@@ -1504,6 +2172,7 @@ function MainApp() {
               setRental(value)
               setAvailabilityMessage("")
               setStatusMessage("")
+              checkAvailability(date, value)
             }}
           />
         ))}
@@ -1526,147 +2195,157 @@ function MainApp() {
           <strong style={styles.selectedRentalValue}>{getRentalLabel(rental)}</strong>
         </div>
 
-        <div style={styles.formGrid}>
-          <label style={styles.label}>
-            Rental Date
-            <input
-              style={styles.input}
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-          </label>
+        <form onSubmit={handleSubmit}>
+          <div style={styles.formGrid}>
+            <label style={styles.label}>
+              Rental Date
+              <input
+                style={styles.input}
+                type="date"
+                value={date}
+                onChange={(e) => {
+                  setDate(e.target.value)
+                  checkAvailability(e.target.value, rental)
+                }}
+              />
+            </label>
 
-          <label style={styles.label}>
-            Requested Rental Time
-            <select
-              style={styles.input}
-              value={rentalTime}
-              onChange={(e) => setRentalTime(e.target.value)}
+            <label style={styles.label}>
+              Requested Rental Time
+              <select
+                style={styles.input}
+                value={rentalTime}
+                onChange={(e) => setRentalTime(e.target.value)}
+              >
+                {timeOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={styles.label}>
+              Tow Location
+              <select
+                style={styles.input}
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+              >
+                {towOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={styles.label}>
+              Email Address
+              <input
+                style={styles.input}
+                type="email"
+                placeholder="customer@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </label>
+
+            <label style={styles.label}>
+              Full Legal Name for Waiver Signature
+              <input
+                style={styles.input}
+                type="text"
+                placeholder="Your full legal name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+
+            <label style={styles.labelFull}>
+              Upload Photo ID
+              <input
+                style={styles.fileInput}
+                type="file"
+                accept="image/*,.pdf"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+              />
+              <span style={styles.fileName}>
+                {file
+                  ? `Selected: ${file.name}`
+                  : bookingId
+                    ? "Booking already has an ID on file"
+                    : "No file selected yet"}
+              </span>
+            </label>
+          </div>
+
+          <div style={styles.priceSummary}>
+            <div style={styles.priceRow}>
+              <span>Rental</span>
+              <strong>${displayRentalPrice}</strong>
+            </div>
+
+            <div style={styles.priceRow}>
+              <span>Tow Fee</span>
+              <strong>${towPrice}</strong>
+            </div>
+
+            <div style={styles.priceRowTotal}>
+              <span>Total Amount Owed</span>
+              <strong>${totalAmount} + fuel</strong>
+            </div>
+          </div>
+
+          <div style={styles.buttonRow}>
+            <button
+              type="submit"
+              style={loading ? styles.buttonDisabled : styles.primaryButton}
+              disabled={loading}
             >
-              {timeOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
+              {loading ? "Checking..." : bookingId ? "Continue This Booking" : "Submit Request"}
+            </button>
 
-          <label style={styles.label}>
-            Tow Location
-            <select
-              style={styles.input}
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
+            <button
+              type="button"
+              style={
+                !bookingId || waiverStatus === "signed"
+                  ? styles.buttonDisabled
+                  : styles.secondaryButton
+              }
+              onClick={() => setShowWaiver(true)}
+              disabled={!bookingId || waiverStatus === "signed"}
             >
-              {towOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              {waiverStatus === "signed" ? "Waiver Signed" : "Review Waiver"}
+            </button>
 
-          <label style={styles.label}>
-            Email Address
-            <input
-              style={styles.input}
-              type="email"
-              placeholder="customer@email.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
+            <button
+              type="button"
+              style={
+                bookingStatus !== "approved_unpaid" || waiverStatus !== "signed" || paying
+                  ? styles.buttonDisabled
+                  : styles.primaryButton
+              }
+              onClick={handlePay}
+              disabled={bookingStatus !== "approved_unpaid" || waiverStatus !== "signed" || paying}
+            >
+              {paying ? "Redirecting..." : "Pay Rental Now"}
+            </button>
 
-          <label style={styles.label}>
-            Full Legal Name for Waiver Signature
-            <input
-              style={styles.input}
-              type="text"
-              placeholder="Your full legal name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
+            <button
+              type="button"
+              style={!bookingId ? styles.buttonDisabled : styles.secondaryButton}
+              onClick={refreshBookingStatus}
+              disabled={!bookingId}
+            >
+              Refresh Approval Status
+            </button>
 
-          <label style={styles.labelFull}>
-            Upload Photo ID
-            <input
-              style={styles.fileInput}
-              type="file"
-              accept="image/*,.pdf"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-            />
-            <span style={styles.fileName}>
-              {file ? `Selected: ${file.name}` : "No file selected yet"}
-            </span>
-          </label>
-        </div>
-
-        <div style={styles.priceSummary}>
-          <div style={styles.priceRow}>
-            <span>Rental</span>
-            <strong>${rentalPrice}</strong>
+            <button type="button" style={styles.secondaryButton} onClick={resetBookingForm}>
+              Clear Form
+            </button>
           </div>
-          <div style={styles.priceRow}>
-            <span>Tow Fee</span>
-            <strong>${towPrice}</strong>
-          </div>
-          <div style={styles.priceRowTotal}>
-            <span>Total Amount Owed</span>
-            <strong>${totalAmount} + fuel</strong>
-          </div>
-        </div>
-
-        <div style={styles.buttonRow}>
-          <button
-            type="button"
-            style={loading ? styles.buttonDisabled : styles.primaryButton}
-            onClick={reserveSpotAndContinue}
-            disabled={loading}
-          >
-            {loading ? "Checking..." : "Submit Request"}
-          </button>
-
-          <button
-            type="button"
-            style={
-              !bookingId || waiverStatus === "signed"
-                ? styles.buttonDisabled
-                : styles.secondaryButton
-            }
-            onClick={() => setShowWaiver(true)}
-            disabled={!bookingId || waiverStatus === "signed"}
-          >
-            {waiverStatus === "signed" ? "Waiver Signed" : "Review Waiver"}
-          </button>
-
-          <button
-            type="button"
-            style={
-              bookingStatus !== "approved_unpaid" || waiverStatus !== "signed" || paying
-                ? styles.buttonDisabled
-                : styles.primaryButton
-            }
-            onClick={payNow}
-            disabled={bookingStatus !== "approved_unpaid" || waiverStatus !== "signed" || paying}
-          >
-            {paying ? "Redirecting..." : "Pay Rental Now"}
-          </button>
-
-          <button
-            type="button"
-            style={!bookingId ? styles.buttonDisabled : styles.secondaryButton}
-            onClick={refreshBookingStatus}
-            disabled={!bookingId}
-          >
-            Refresh Approval Status
-          </button>
-
-          <button type="button" style={styles.secondaryButton} onClick={resetBookingForm}>
-            Clear Form
-          </button>
-        </div>
+        </form>
 
         {bookingId && showWaiver ? (
           <section style={styles.waiverCard}>
@@ -1745,7 +2424,7 @@ function MainApp() {
               style={
                 !waiverAccepted || !name.trim() ? styles.buttonDisabled : styles.secondaryButton
               }
-              onClick={signWaiver}
+              onClick={handleSignWaiver}
               disabled={!waiverAccepted || !name.trim()}
             >
               I Agree and Sign Waiver
@@ -1789,7 +2468,11 @@ function MainApp() {
         {statusMessage ? <div style={styles.infoBox}>{statusMessage}</div> : null}
       </section>
 
-      <BookingLookupCard />
+      <BookingLookupCard onLoadBooking={loadExistingBookingIntoForm} />
+
+      <footer style={styles.policyFooter}>
+        <small style={styles.policyText}>{cancellationPolicyText}</small>
+      </footer>
     </div>
   )
 }
@@ -2006,6 +2689,7 @@ const styles = {
     boxShadow: "0 16px 36px rgba(14, 34, 53, 0.12)",
     border: "1px solid rgba(15, 23, 32, 0.06)",
   },
+
   formHeaderRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -2173,6 +2857,16 @@ const styles = {
     fontWeight: 800,
     cursor: "pointer",
   },
+  smallButton: {
+    border: "1px solid #d5dee7",
+    background: "#ffffff",
+    color: "#102030",
+    padding: "8px 10px",
+    borderRadius: "10px",
+    fontSize: "13px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
   buttonDisabled: {
     border: "none",
     background: "#b8c3cd",
@@ -2272,6 +2966,15 @@ const styles = {
     color: "#1d3347",
     fontWeight: 700,
   },
+  loadingBox: {
+    marginTop: "14px",
+    padding: "14px 16px",
+    borderRadius: "14px",
+    background: "#eef4fb",
+    border: "1px solid #d6e2f0",
+    color: "#28465f",
+    fontWeight: 700,
+  },
   successPage: {
     minHeight: "100vh",
     display: "flex",
@@ -2337,178 +3040,3 @@ const styles = {
     color: "#102030",
     fontSize: "14px",
   },
-  adminPage: {
-    minHeight: "100vh",
-    background: "#eef3f7",
-    padding: "24px",
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-    color: "#102030",
-  },
-  adminShell: {
-    maxWidth: "1400px",
-    margin: "0 auto",
-  },
-  adminTopBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "16px",
-    flexWrap: "wrap",
-    marginBottom: "20px",
-  },
-  adminTopButtons: {
-    display: "flex",
-    gap: "12px",
-    flexWrap: "wrap",
-  },
-  adminTitle: {
-    margin: 0,
-    fontSize: "38px",
-    fontWeight: 800,
-    color: "#0f2233",
-  },
-  adminSubtitle: {
-    marginTop: "8px",
-    color: "#627382",
-    fontSize: "16px",
-  },
-  adminSection: {
-    background: "#ffffff",
-    borderRadius: "24px",
-    padding: "24px",
-    boxShadow: "0 16px 36px rgba(14, 34, 53, 0.08)",
-    border: "1px solid rgba(15, 23, 32, 0.06)",
-    marginTop: "20px",
-  },
-  adminSectionHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "16px",
-    flexWrap: "wrap",
-    marginBottom: "18px",
-  },
-  adminSectionTitle: {
-    margin: 0,
-    fontSize: "24px",
-    fontWeight: 800,
-    color: "#0f2233",
-  },
-  adminSectionText: {
-    margin: "8px 0 0 0",
-    color: "#627382",
-    fontSize: "15px",
-  },
-  adminBlockGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: "16px",
-    alignItems: "end",
-  },
-  adminBlockAction: {
-    display: "flex",
-    alignItems: "end",
-  },
-  adminList: {
-    display: "grid",
-    gap: "14px",
-  },
-  adminListCard: {
-    border: "1px solid #e1e8ef",
-    borderRadius: "16px",
-    padding: "16px",
-    background: "#f8fbfd",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "16px",
-    flexWrap: "wrap",
-  },
-  adminListMain: {
-    display: "grid",
-    gap: "6px",
-  },
-  adminListTitle: {
-    fontSize: "18px",
-    fontWeight: 800,
-    color: "#0f2233",
-  },
-  adminListMeta: {
-    fontSize: "14px",
-    color: "#566776",
-    fontWeight: 700,
-  },
-  adminListReason: {
-    fontSize: "14px",
-    color: "#6b7d8b",
-  },
-  bookingTableWrap: {
-    overflowX: "auto",
-    border: "1px solid #e5edf5",
-    borderRadius: "18px",
-  },
-  bookingTable: {
-    width: "100%",
-    borderCollapse: "collapse",
-    minWidth: "1200px",
-    background: "#ffffff",
-  },
-  th: {
-    textAlign: "left",
-    padding: "14px",
-    background: "#f7fafc",
-    borderBottom: "1px solid #e5edf5",
-    fontSize: "13px",
-    color: "#5b6b79",
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
-  },
-  tr: {
-    borderBottom: "1px solid #eef3f7",
-  },
-  td: {
-    padding: "14px",
-    verticalAlign: "top",
-    fontSize: "14px",
-    color: "#102030",
-  },
-  customerCell: {
-    display: "grid",
-    gap: "4px",
-  },
-  actionsCell: {
-    display: "grid",
-    gap: "8px",
-  },
-  smallApproveButton: {
-    border: "none",
-    background: "#157347",
-    color: "#ffffff",
-    padding: "10px 12px",
-    borderRadius: "10px",
-    fontSize: "13px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  smallDenyButton: {
-    border: "none",
-    background: "#b42318",
-    color: "#ffffff",
-    padding: "10px 12px",
-    borderRadius: "10px",
-    fontSize: "13px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  smallNeutralButton: {
-    border: "1px solid #d5dee7",
-    background: "#ffffff",
-    color: "#102030",
-    padding: "10px 12px",
-    borderRadius: "10px",
-    fontSize: "13px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-}
