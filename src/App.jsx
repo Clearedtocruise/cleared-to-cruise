@@ -646,6 +646,10 @@ testimonialPhotos.forEach((file) => {
     </section>
   )
 }
+<TestimonialsSection
+  testimonials={testimonials}
+  onSubmitted={loadTestimonials}
+/>
 
 function BookingLookupCard({ onLoadBooking }) {
   const [lookupBookingId, setLookupBookingId] = useState("")
@@ -2809,6 +2813,23 @@ function prevPhoto(testimonialIndex, photosLength) {
     }
   })
 }
+async function loadTestimonials() {
+  try {
+    const res = await fetch(`${API}/api/testimonials`)
+    const data = await res.json().catch(() => [])
+
+    if (!res.ok) {
+      console.error("Failed to load testimonials", data)
+      setTestimonials([])
+      return
+    }
+
+    setTestimonials(Array.isArray(data) ? data : [])
+  } catch (err) {
+    console.error("Failed to load testimonials", err)
+    setTestimonials([])
+  }
+}
 
   const [rental, setRental] = useState("Jet Ski (Single)")
   const [date, setDate] = useState("")
@@ -3543,6 +3564,11 @@ setShowWaiver(true)
         {availabilityMessage ? <div style={styles.successBox}>{availabilityMessage}</div> : null}
         {statusMessage ? <div style={styles.infoBox}>{statusMessage}</div> : null}
       </section>
+
+<TestimonialsSection
+  testimonials={testimonials}
+  onSubmitted={loadTestimonials}
+/>
 
       <BookingLookupCard onLoadBooking={loadExistingBookingIntoForm} />
 
