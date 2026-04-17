@@ -560,8 +560,6 @@ function TestimonialsSection({ testimonials, onSubmitted }) {
         </div>
       </div>
 
-      {Array.isArray(testimonials) && testimonials.length > 0 ? (
-        <div style={styles.lookupList}>
 {Array.isArray(testimonials) && testimonials.length > 0 ? (
   <div style={styles.testimonialSliderWrap}>
     
@@ -571,9 +569,9 @@ function TestimonialsSection({ testimonials, onSubmitted }) {
       style={styles.testimonialArrow}
     >
       ‹
+      {(()=>)}
     </button>
 
-    {(() => {
       const item = testimonials[activeTestimonialIndex]
       const photos =
         item.photos && Array.isArray(item.photos)
@@ -635,7 +633,6 @@ function TestimonialsSection({ testimonials, onSubmitted }) {
           )}
         </div>
       )
-    })()}
 
     <button
       type="button"
@@ -3607,10 +3604,211 @@ setShowWaiver(true)
 
       <BookingLookupCard onLoadBooking={loadExistingBookingIntoForm} />
 
-      <TestimonialsSection
-        testimonials={testimonials}
-        onSubmitted={refreshTestimonials}
-      />
+function TestimonialsSection({
+  testimonials,
+  onSubmitted,
+  activeTestimonialIndex,
+  activePhotoIndexes,
+  nextTestimonial,
+  prevTestimonial,
+  nextPhoto,
+  prevPhoto,
+}) {
+  const [testimonialName, setTestimonialName] = useState("")
+  const [testimonialText, setTestimonialText] = useState("")
+  const [testimonialPhoto, setTestimonialPhoto] = useState(null)
+  const [testimonialLoading, setTestimonialLoading] = useState(false)
+  const [testimonialStatus, setTestimonialStatus] = useState("")
+
+  async function submitTestimonial(e) {
+    e.preventDefault()
+    setTestimonialStatus("")
+
+    if (!testimonialName.trim() || !testimonialText.trim()) {
+      setTestimonialStatus("Please enter your name and testimonial.")
+      return
+    }
+
+    try {
+      setTestimonialLoading(true)
+
+      const formData = new FormData()
+      formData.append("customerName", testimonialName.trim())
+      formData.append("testimonialText", testimonialText.trim())
+      if (testimonialPhoto) {
+        formData.append("photo", testimonialPhoto)
+      }
+
+      const res = await fetch(`${API}/api/testimonials`, {
+        method: "POST",
+        body: formData,
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setTestimonialStatus(data.error || "Could not submit testimonial.")
+        return
+      }
+
+      setTestimonialName("")
+      setTestimonialText("")
+      setTestimonialPhoto(null)
+      setTestimonialStatus("Testimonial submitted for approval.")
+
+      if (typeof onSubmitted === "function") {
+        onSubmitted()
+      }
+    } catch (err) {
+      console.error(err)
+      setTestimonialStatus("Server error while submitting testimonial.")
+    } finally {
+      setTestimonialLoading(false)
+    }
+  }
+
+  return (
+    <section style={styles.testimonialsSection}>
+      <h2 style={styles.sectionTitle}>Testimonials</h2>
+      <p style={styles.sectionSubtitle}>
+        See what customers are saying and submit your own experience for approval.
+      </p>
+
+      {Array.isArray(testimonials) && testimonials.length > 0 ? (
+        <div style={styles.testimonialSliderWrap}>
+          <button
+            type="button"
+            onClick={prevTestimonial}
+            style={styles.testimonialArrow}
+          >
+            ‹
+          </button>
+
+          {(() => {
+            const item = testimonials[activeTestimonialIndex]
+
+            const photos =
+              Array.isArray(item.photos)
+                ? item.photos
+                : item.photoUrl
+                  ? [item.photoUrl]
+                  : []
+
+            const activePhotoIndex =
+              activePhotoIndexes[activeTestimonialIndex] || 0
+
+            return (
+              <div key={item.id} style={styles.lookupCard}>
+                <div style={styles.lookupRow}>
+                  <strong>{item.customerName || item.name || "Customer"}</strong>
+                </div>
+
+                {item.rentalLabel ? (
+                  <div style={styles.lookupRow}>
+                    <strong>Rental:</strong> {item.rentalLabel}
+                  </div>
+                ) : null}
+
+                <div style={styles.lookupRow}>
+                  {item.testimonialText || item.text || ""}
+                </div>
+
+                {photos.length > 0 ? (
+                  <div style={styles.testimonialPhotoWrap}>
+                    <img
+                      src={photos[activePhotoIndex]}
+                      alt="Customer testimonial"
+                      style={styles.testimonialImage}
+                    />
+
+                    {photos.length > 1 ? (
+                      <div style={styles.testimonialPhotoControls}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            prevPhoto(activeTestimonialIndex, photos.length)
+                          }
+                          style={styles.testimonialPhotoArrow}
+                        >
+                          ‹
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            nextPhoto(activeTestimonialIndex, photos.length)
+                          }
+                          style={styles.testimonialPhotoArrow}
+                        >
+                          ›
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })()}
+
+          <button
+            type="button"
+            onClick={nextTestimonial}
+            style={styles.testimonialArrow}
+          >
+            ›
+          </button>
+        </div>
+      ) : (
+        <div style={styles.infoBox}>No approved testimonials yet.</div>
+      )}
+
+      <form onSubmit={submitTestimonial} style={{ marginTop: "20px" }}>
+        <div style={styles.formGrid}>
+          <label style={styles.label}>
+            Your Name
+            <input
+              style={styles.input}
+              type="text"
+              value={testimonialName}
+              onChange={(e) => setTestimonialName(e.target.value)}
+            />
+          </label>
+
+          <label style={styles.label}>
+            Your Testimonial
+            <textarea
+              style={styles.textarea}
+              value={testimonialText}
+              onChange={(e) => setTestimonialText(e.target.value)}
+            />
+          </label>
+
+          <label style={styles.label}>
+            Upload Photo (Optional)
+            <input
+              style={styles.input}
+              type="file"
+              accept="image/*"
+              onChange={(e) => setTestimonialPhoto(e.target.files?.[0] || null)}
+            />
+          </label>
+        </div>
+
+        <button
+          type="submit"
+          style={styles.primaryButton}
+          disabled={testimonialLoading}
+        >
+          {testimonialLoading ? "Submitting..." : "Submit Testimonial"}
+        </button>
+
+        {testimonialStatus ? (
+          <div style={styles.infoBox}>{testimonialStatus}</div>
+        ) : null}
+      </form>
+    </section>
+  )
+}
 
       <footer style={styles.policyFooter}>
         <small style={styles.policyText}>{cancellationPolicyText}</small>
@@ -4232,6 +4430,9 @@ heroLogo: {
     padding: "16px",
     display: "grid",
     gap: "10px",
+    maxWidth: "900px",
+    marginLeft: "auto",
+    marginRight: "auto",
   },
   lookupRow: {
     display: "flex",
@@ -4247,12 +4448,14 @@ heroLogo: {
     marginTop: "4px",
   },
   testimonialImage: {
+    display: "block",
     width: "100%",
-    maxHeight: "320px",
-    objectFit: "cover",
-    borderRadius: "14px",
-    marginTop: "8px",
-    border: "1px solid #e1e8ef",
+    maxHeight: "520px",
+    height: "220px",
+    objectFit: "contain",
+    margin: "0 auto",
+    borderRadius: "10px",
+    background: "#f3f4f6",
   },
   policyFooter: {
     maxWidth: "1200px",
@@ -4541,4 +4744,49 @@ heroLogo: {
   slider: {
     width: "100%",
   },
+  testimonialSliderWrap: {
+  position: "relative",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+testimonialArrow: {
+  position: "absolute",
+  top: "50%",
+  transform: "translateY(-50%)",
+  background: "rgba(0,0,0,0.5)",
+  color: "#fff",
+  border: "none",
+  fontSize: "24px",
+  padding: "8px 12px",
+  cursor: "pointer",
+  zIndex: 2,
+},
+
+testimonialPhotoWrap: {
+  position: "relative",
+  width: "100%",
+  maxHeight: "520px",
+  margin: "12px auto 0",
+  overflow: "hidden",
+  borderRadius: "10px",
+},
+
+testimonialPhoto: {
+  width: "100%",
+  height: "300px",
+  objectFit: "cover",
+},
+
+testimonialPhotoArrow: {
+  position: "absolute",
+  top: "50%",
+  transform: "translateY(-50%)",
+  background: "rgba(0,0,0,0.5)",
+  color: "#fff",
+  border: "none",
+  fontSize: "18px",
+  padding: "6px 10px",
+  cursor: "pointer",
 }
