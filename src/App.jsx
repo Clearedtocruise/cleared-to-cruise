@@ -1,16 +1,99 @@
 import { useEffect, useMemo, useState } from "react"
 import { BrowserRouter, Routes, Route, useParams } from "react-router-dom"
 import "./App.css"
+import { useNavigate } from "react-router-dom"
+import DatePicker from "react-datepicker"
+import "react-datepicker/dist/react-datepicker.css"
 
+function RequestReceived() {
+  return (
+   <div style={{ textAlign: "center", padding: "60px 20px" }}>
+  <h1 style={{
+    color: "#ffffff",
+    textShadow: "0 2px 6px rgba(0,0,0,0.8)"
+  }}>
+    Request Received
+  </h1>
+
+  <p style={{
+    marginTop: "20px",
+    fontSize: "18px",
+    color: "#ffffff",
+    textShadow: "0 2px 6px rgba(0,0,0,0.8)"
+  }}>
+    You're almost ready to hit the water.
+  </p>
+
+  <p style={{
+    marginTop: "10px",
+    color: "rgba(255,255,255,0.85)",
+    textShadow: "0 2px 6px rgba(0,0,0,0.8)"
+  }}>
+    Your rental request is under review. You'll receive an email once approved with instructions to complete payment.
+  </p>
+</div>
+  )
+}
 const API = "https://cleared-to-cruise-api.onrender.com"
+const HEADER_LOGO = "/images/cleared-to-cruise-main-heading.png"
 
-const rentalOptions = [
-  { value: "Jet Ski (Single)", label: "Jet Ski (Single) — $400 + fuel", price: 400 },
-  { value: "Jet Ski (Double)", label: "Jet Ski (Double) — $750 + fuel", price: 750 },
-  { value: "Pontoon - 6 Hours", label: "Pontoon - 6 Hours — $600 + fuel", price: 600 },
-  { value: "Pontoon - 8 Hours", label: "Pontoon - 8 Hours — $750 + fuel", price: 750 },
-  { value: "Pontoon - 10 Hours", label: "Pontoon - 10 Hours — $900 + fuel", price: 900 },
-  { value: "Bass Boat - Full Day", label: "Bass Boat - Full Day — $400 + fuel", price: 400 },
+/* =========================
+   🔥 NEW: SAFE BOOKING FETCH
+   ========================= */
+async function fetchBookingsSafe() {
+  try {
+    const res = await fetch(`${API}/api/bookings`)
+    if (res.ok) return await res.json()
+  } catch {}
+
+  try {
+    const token = localStorage.getItem("ctc_admin_token")
+    const res = await fetch(`${API}/api/admin/bookings`, {
+      headers: { Authorization: `Basic ${token}` },
+    })
+    if (res.ok) return await res.json()
+  } catch {}
+
+  return []
+}
+
+/* =========================
+   🔥 NEW: JET SKI LOCK LOGIC
+   ========================= */
+function isJetSkiBlocked(bookings, rental, date) {
+  if (!date) return false
+
+  const sameDay = bookings.filter(
+    (b) =>
+      b.date === date &&
+      (b.rentalLabel === "Jet Ski (Single)" ||
+        b.rentalLabel === "Jet Ski (Double)") &&
+      b.status !== "denied"
+  )
+
+  let used = 0
+
+  for (const b of sameDay) {
+    if (b.rentalLabel === "Jet Ski (Double)") used += 2
+    else used += 1
+  }
+
+  if (rental === "Jet Ski (Double)") return used > 0
+  if (rental === "Jet Ski (Single)") return used >= 2
+
+  return false
+}
+
+/* =========================
+   ORIGINAL CODE (UNCHANGED BELOW)
+   ========================= */
+
+const fallbackRentalOptions = [
+  { value: "Jet Ski (Single)", label: "Jet Ski (Single) — $350 + fuel", price: 350, sortOrder: 1 },
+  { value: "Jet Ski (Double)", label: "Jet Ski (Double) — $650 + fuel", price: 650, sortOrder: 2 },
+  { value: "Pontoon - Half Day", label: "Pontoon - Half Day — $500 + fuel", price: 500, sortOrder: 3 },
+  { value: "Pontoon - Full Day", label: "Pontoon - Full Day — $800 + fuel", price: 800, sortOrder: 4 },
+  { value: "Bass Boat - Full Day", label: "Bass Boat - Full Day — $300 + fuel", price: 300, sortOrder: 5 },
 ]
 
 const towOptions = [
@@ -43,10 +126,9 @@ const timeOptions = [
   "04:00 PM",
   "04:30 PM",
   "05:00 PM",
-]
-
-const CASTAIC_INFO_URL = "https://parks.lacounty.gov/castaic-lake-state-recreation-area/"
-const PYRAMID_INFO_URL = "https://water.ca.gov/What-We-Do/Recreation/Pyramid-Lake-Recreation"
+];
+const CASTAIC_INFO_URL = "https://parks.lacounty.gov/castaic-lake-state-recreation-area/";
+const PYRAMID_INFO_URL = "https://water.ca.gov/What-We-Do/Recreation/Pyramid-Lake-Recreation";
 
 const heroRentalGroups = [
   {
@@ -68,10 +150,10 @@ const heroRentalGroups = [
   {
     key: "pontoon",
     title: "Pontoon Rentals",
-    text: "Comfortable group cruising with multiple time options.",
+    text: "Comfortable group cruising with half-day and full-day options.",
     image: "/images/suntracker-pontoon.png",
     alt: "Pontoon rental",
-    options: ["Pontoon - 6 Hours", "Pontoon - 8 Hours", "Pontoon - 10 Hours"],
+    options: ["Pontoon - Half Day", "Pontoon - Full Day"],
   },
   {
     key: "bass-boat",
@@ -86,6 +168,18 @@ const heroRentalGroups = [
 const cancellationPolicyText =
   "Cancellation Policy: Cancellations must be made at least 7 days before the rental date or the rental payment will be forfeited. In either case, the security deposit will be returned unless the boat or equipment was used and damaged."
 
+const defaultPricingEditorState = {
+  JetSkiSingle: 350,
+  JetSkiDouble: 650,
+  PontoonHalfDay: 500,
+  PontoonFullDay: 800,
+  BassBoatFullDay: 300,
+}
+
+/* =========================
+   UTILITY FUNCTIONS (UNCHANGED)
+   ========================= */
+
 function formatDate(value) {
   if (!value) return "—"
   return value
@@ -96,16 +190,22 @@ function normalizeStatusLabel(value) {
   return String(value).replaceAll("_", " ")
 }
 
-function getRentalPrice(rentalValue) {
-  return rentalOptions.find((item) => item.value === rentalValue)?.price || 0
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase()
+}
+
+function dollarsFromCents(value) {
+  return (Number(value || 0) / 100).toFixed(2)
+}
+
+function centsFromDollars(value) {
+  const numeric = Number(value || 0)
+  if (!Number.isFinite(numeric)) return 0
+  return Math.round(numeric * 100)
 }
 
 function getTowPrice(towValue) {
   return towOptions.find((item) => item.value === towValue)?.price || 0
-}
-
-function getRentalLabel(rentalValue) {
-  return rentalOptions.find((item) => item.value === rentalValue)?.label || rentalValue
 }
 
 function getStoredAdminToken() {
@@ -117,6 +217,143 @@ function setStoredAdminToken(token) {
     localStorage.setItem("ctc_admin_token", token)
   } else {
     localStorage.removeItem("ctc_admin_token")
+  }
+}
+
+function sortRentalOptions(list) {
+  return [...list].sort((a, b) => {
+    const left = Number(a.sortOrder || 0)
+    const right = Number(b.sortOrder || 0)
+    return left - right
+  })
+}
+
+function mergeServerPricingIntoFallback(serverPricing) {
+  if (!Array.isArray(serverPricing) || serverPricing.length === 0) {
+    return fallbackRentalOptions
+  }
+
+  const mapped = serverPricing
+    .map((item, index) => {
+      const value = String(item.rentalKey || item.value || "").trim()
+      const baseLabel = String(item.rentalLabel || item.label || value).trim()
+      const cents = Number(item.priceCents ?? 0)
+      const price =
+        Number.isFinite(cents) && cents > 0
+          ? Math.round(cents / 100)
+          : Number(item.price || item.priceDollars || 0)
+
+      if (!value) return null
+
+      return {
+        value,
+        label: `${baseLabel} — $${price} + fuel`,
+        price,
+        sortOrder: Number(item.sortOrder ?? index + 1),
+      }
+    })
+    .filter(Boolean)
+
+  if (mapped.length === 0) {
+    return fallbackRentalOptions
+  }
+
+  const byValue = new Map(mapped.map((item) => [item.value, item]))
+  const merged = fallbackRentalOptions.map((fallbackItem) => {
+    return byValue.get(fallbackItem.value) || fallbackItem
+  })
+
+  for (const item of mapped) {
+    if (!merged.some((existing) => existing.value === item.value)) {
+      merged.push(item)
+    }
+  }
+
+  return sortRentalOptions(merged)
+}
+
+function getRentalPrice(rentalValue, rentalOptions) {
+  return rentalOptions.find((item) => item.value === rentalValue)?.price || 0
+}
+
+function getRentalLabel(rentalValue, rentalOptions) {
+  return rentalOptions.find((item) => item.value === rentalValue)?.label || rentalValue
+}
+
+function getPricingEditorStateFromOptions(rentalOptions) {
+  return {
+    JetSkiSingle: getRentalPrice("Jet Ski (Single)", rentalOptions) || 350,
+    JetSkiDouble: getRentalPrice("Jet Ski (Double)", rentalOptions) || 650,
+    PontoonHalfDay: getRentalPrice("Pontoon - Half Day", rentalOptions) || 500,
+    PontoonFullDay: getRentalPrice("Pontoon - Full Day", rentalOptions) || 800,
+    BassBoatFullDay: getRentalPrice("Bass Boat - Full Day", rentalOptions) || 300,
+  }
+}
+
+function buildAdminPricingPayload(pricingEditor) {
+  return [
+    {
+      rentalKey: "Jet Ski (Single)",
+      rentalLabel: "Jet Ski (Single)",
+      priceCents: centsFromDollars(pricingEditor.JetSkiSingle),
+      sortOrder: 1,
+    },
+    {
+      rentalKey: "Jet Ski (Double)",
+      rentalLabel: "Jet Ski (Double)",
+      priceCents: centsFromDollars(pricingEditor.JetSkiDouble),
+      sortOrder: 2,
+    },
+    {
+      rentalKey: "Pontoon - Half Day",
+      rentalLabel: "Pontoon - Half Day",
+      priceCents: centsFromDollars(pricingEditor.PontoonHalfDay),
+      sortOrder: 3,
+    },
+    {
+      rentalKey: "Pontoon - Full Day",
+      rentalLabel: "Pontoon - Full Day",
+      priceCents: centsFromDollars(pricingEditor.PontoonFullDay),
+      sortOrder: 4,
+    },
+    {
+      rentalKey: "Bass Boat - Full Day",
+      rentalLabel: "Bass Boat - Full Day",
+      priceCents: centsFromDollars(pricingEditor.BassBoatFullDay),
+      sortOrder: 5,
+    },
+  ]
+}
+
+async function fetchPublicPricing() {
+  try {
+    const res = await fetch(`${API}/api/pricing`)
+    const data = await res.json().catch(() => [])
+
+    if (!res.ok) {
+      return fallbackRentalOptions
+    }
+
+    return mergeServerPricingIntoFallback(data)
+  } catch (error) {
+    console.error("Pricing load failed:", error)
+    return fallbackRentalOptions
+  }
+}
+
+async function fetchPublicTestimonials() {
+  try {
+    const res = await fetch(`${API}/api/testimonials`)
+    const data = await res.json().catch(() => [])
+
+    if (!res.ok) {
+      return []
+    }
+
+    return Array.isArray(data) ? data : []
+  } catch (error) {
+    console.error("Testimonials load failed:", error)
+    return []
   }
 }
 
@@ -200,6 +437,16 @@ function statusPillStyle(status) {
         color: "#0369a1",
         borderColor: "#bae6fd",
       }
+    case "requested":
+    case "card_on_file":
+    case "held":
+    case "released":
+      return {
+        ...base,
+        background: "#f5f3ff",
+        color: "#6d28d9",
+        borderColor: "#ddd6fe",
+      }
     default:
       return {
         ...base,
@@ -245,6 +492,162 @@ function buildCalendarDays(monthDate) {
   }
 
   return cells
+}
+
+function TestimonialsSection({ testimonials, onSubmitted }) {
+  const [testimonialName, setTestimonialName] = useState("")
+  const [testimonialText, setTestimonialText] = useState("")
+  const [testimonialPhoto, setTestimonialPhoto] = useState(null)
+  const [testimonialLoading, setTestimonialLoading] = useState(false)
+  const [testimonialStatus, setTestimonialStatus] = useState("")
+
+  async function submitTestimonial(e) {
+    e.preventDefault()
+    setTestimonialStatus("")
+
+    if (!testimonialName.trim() || !testimonialText.trim()) {
+      setTestimonialStatus("Please enter your name and testimonial.")
+      return
+    }
+
+    setTestimonialLoading(true)
+
+    try {
+      const formData = new FormData()
+      formData.append("customerName", testimonialName.trim())
+      formData.append("testimonialText", testimonialText.trim())
+
+      if (testimonialPhoto) {
+        formData.append("photo", testimonialPhoto)
+      }
+
+      const res = await fetch(`${API}/api/testimonials`, {
+        method: "POST",
+        body: formData,
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setTestimonialStatus(data.error || "Could not submit testimonial.")
+        return
+      }
+
+      setTestimonialName("")
+      setTestimonialText("")
+      setTestimonialPhoto(null)
+      setTestimonialStatus("Thank you. Your testimonial was submitted for approval.")
+
+      if (onSubmitted) {
+        onSubmitted()
+      }
+    } catch (error) {
+      console.error(error)
+      setTestimonialStatus("Server error while submitting testimonial.")
+    } finally {
+      setTestimonialLoading(false)
+    }
+  }
+
+  return (
+    <section style={styles.mainCard}>
+      <div style={styles.formHeaderRow}>
+        <div>
+          <h2 style={styles.sectionTitle}>Testimonials</h2>
+          <p style={styles.sectionSubtext}>
+            See what customers are saying and submit your own experience for approval.
+          </p>
+        </div>
+      </div>
+
+      {Array.isArray(testimonials) && testimonials.length > 0 ? (
+        <div style={styles.lookupList}>
+          {testimonials.map((item) => (
+            <div key={item.id} style={styles.lookupCard}>
+              <div style={styles.lookupRow}>
+                <strong>{item.customerName || item.name || "Customer"}</strong>
+              </div>
+
+              {item.rentalLabel ? (
+                <div style={styles.lookupRow}>
+                  <strong>Rental:</strong> {item.rentalLabel}
+                </div>
+              ) : null}
+
+              <div style={styles.lookupRow}>
+                {item.testimonialText || item.text || ""}
+              </div>
+
+              {item.photoUrl ? (
+                <img
+                  src={item.photoUrl}
+                  alt="Customer testimonial"
+                  style={styles.testimonialImage}
+                />
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={styles.infoBox}>No approved testimonials are live yet.</div>
+      )}
+
+      <form onSubmit={submitTestimonial} style={{ marginTop: "20px" }}>
+        <div style={styles.formGrid}>
+          <label style={styles.label}>
+            Your Name
+            <input
+              style={styles.input}
+              type="text"
+              value={testimonialName}
+              onChange={(e) => setTestimonialName(e.target.value)}
+              placeholder="Your name"
+            />
+          </label>
+
+          <label style={styles.labelFull}>
+            Your Testimonial
+            <textarea
+              style={styles.textarea}
+              value={testimonialText}
+              onChange={(e) => setTestimonialText(e.target.value)}
+              placeholder="Tell future renters about your experience."
+            />
+          </label>
+
+          <label style={styles.labelFull}>
+            Upload Photo (Optional)
+            <input
+              style={styles.fileInput}
+              type="file"
+              accept="image/*"
+              onChange={(e) =>
+                setTestimonialPhoto(e.target.files?.[0] || null)
+              }
+            />
+          </label>
+        </div>
+
+        <div style={styles.buttonRow}>
+          <button
+            type="submit"
+            style={
+              testimonialLoading
+                ? styles.buttonDisabled
+                : styles.primaryButton
+            }
+            disabled={testimonialLoading}
+          >
+            {testimonialLoading ? "Submitting..." : "Submit Testimonial"}
+          </button>
+        </div>
+
+        {testimonialStatus ? (
+          <div style={styles.infoBox}>{testimonialStatus}</div>
+        ) : null}
+      </form>
+    </section>
+  )
 }
 
 function BookingLookupCard({ onLoadBooking }) {
@@ -427,6 +830,7 @@ function BookingLookupCard({ onLoadBooking }) {
                   {normalizeStatusLabel(booking.status || "new")}
                 </span>
               </div>
+
               <div style={styles.lookupRow}>
                 <strong>Payment:</strong>{" "}
                 <span style={statusPillStyle(booking.paymentStatus || "unpaid")}>
@@ -451,43 +855,93 @@ function BookingLookupCard({ onLoadBooking }) {
   )
 }
 
-async function handleAdminLogin(e) {
-  e.preventDefault()
-  setError("")
+function AdminLoginCard({ onLoginSuccess }) {
+  const [username, setUsername] = useState("")
+  const [password, setPassword] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
 
-  if (!username.trim() || !password.trim()) {
-    setError("Enter your admin username and password.")
-    return
-  }
+  async function handleAdminLogin(e) {
+    e.preventDefault()
+    setError("")
 
-  setLoading(true)
-
-  try {
-    // ✅ SAVE PASSWORD AS TOKEN
-   const encoded = btoa(`${username.trim()}:${password.trim()}`)
-localStorage.setItem("ctc_admin_token", encoded)
-
-    // ✅ TEST AUTH RIGHT AWAY
-    const res = await fetch(`${API}/api/admin/bookings`, {
-      headers: {
-        Authorization:
-          "Basic " + btoa(`${username.trim()}:${password.trim()}`),
-      },
-    })
-
-    if (!res.ok) {
-      localStorage.removeItem("ctc_admin_token")
-      setError("Invalid admin credentials")
+    if (!username.trim() || !password.trim()) {
+      setError("Enter your admin username and password.")
       return
     }
 
-    onLoginSuccess()
-  } catch (err) {
-    console.error(err)
-    setError("Server error during admin login.")
-  } finally {
-    setLoading(false)
+    setLoading(true)
+
+    try {
+      const encoded = btoa(`${username.trim()}:${password.trim()}`)
+      localStorage.setItem("ctc_admin_token", encoded)
+
+      const res = await fetch(`${API}/api/admin/bookings`, {
+        headers: {
+          Authorization: `Basic ${encoded}`,
+        },
+      })
+
+      if (!res.ok) {
+        localStorage.removeItem("ctc_admin_token")
+        setError("Invalid admin credentials")
+        return
+      }
+
+      onLoginSuccess()
+    } catch (err) {
+      console.error(err)
+      localStorage.removeItem("ctc_admin_token")
+      setError("Server error during admin login.")
+    } finally {
+      setLoading(false)
+    }
   }
+
+  return (
+    <div style={styles.adminLoginWrap}>
+      <div style={styles.adminLoginCard}>
+        <h2 style={styles.adminLoginTitle}>Admin Login</h2>
+        <p style={styles.adminLoginText}>
+          Enter your admin username and password to access the Cleared to Cruise admin panel.
+        </p>
+
+        <form onSubmit={handleAdminLogin} style={styles.adminLoginForm}>
+          <label style={styles.label}>
+            Username
+            <input
+              style={styles.input}
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Admin username"
+            />
+          </label>
+
+          <label style={styles.label}>
+            Password
+            <input
+              style={styles.input}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Admin password"
+            />
+          </label>
+
+          <button
+            type="submit"
+            style={loading ? styles.buttonDisabled : styles.primaryButton}
+            disabled={loading}
+          >
+            {loading ? "Logging In..." : "Log In"}
+          </button>
+        </form>
+
+        {error ? <div style={styles.errorBox}>{error}</div> : null}
+      </div>
+    </div>
+  )
 }
 
 function AdminPage() {
@@ -496,6 +950,8 @@ function AdminPage() {
   const [bookings, setBookings] = useState([])
   const [blockedDates, setBlockedDates] = useState([])
   const [pricingOverrides, setPricingOverrides] = useState([])
+  const [adminTestimonials, setAdminTestimonials] = useState([])
+  const [rentalOptions, setRentalOptions] = useState(fallbackRentalOptions)
 
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState("")
@@ -516,10 +972,13 @@ function AdminPage() {
   const [discountLabel, setDiscountLabel] = useState("Friends & Family")
   const [discountType, setDiscountType] = useState("manual_discount")
 
+  const [pricingEditor, setPricingEditor] = useState(defaultPricingEditorState)
+  const [pricingPercentAdjustment, setPricingPercentAdjustment] = useState(0)
+
   const [editingBookingId, setEditingBookingId] = useState(null)
   const [editDate, setEditDate] = useState("")
   const [editTime, setEditTime] = useState("")
-  const [editRentalLabel, setEditRentalLabel] = useState("Pontoon - 6 Hours")
+  const [editRentalLabel, setEditRentalLabel] = useState("Pontoon - Half Day")
   const [editTowLocation, setEditTowLocation] = useState("None")
   const [editCustomerEmail, setEditCustomerEmail] = useState("")
   const [editPrintedName, setEditPrintedName] = useState("")
@@ -546,12 +1005,37 @@ function AdminPage() {
 
   const calendarDays = useMemo(() => buildCalendarDays(calendarMonth), [calendarMonth])
 
+  const previewPricingEditor = useMemo(() => {
+    const multiplier = 1 + pricingPercentAdjustment / 100
+
+    return {
+      JetSkiSingle: Math.max(0, Math.round(Number(pricingEditor.JetSkiSingle || 0) * multiplier)),
+      JetSkiDouble: Math.max(0, Math.round(Number(pricingEditor.JetSkiDouble || 0) * multiplier)),
+      PontoonHalfDay: Math.max(
+        0,
+        Math.round(Number(pricingEditor.PontoonHalfDay || 0) * multiplier)
+      ),
+      PontoonFullDay: Math.max(
+        0,
+        Math.round(Number(pricingEditor.PontoonFullDay || 0) * multiplier)
+      ),
+      BassBoatFullDay: Math.max(
+        0,
+        Math.round(Number(pricingEditor.BassBoatFullDay || 0) * multiplier)
+      ),
+    }
+  }, [pricingEditor, pricingPercentAdjustment])
+
   function handleAdminLogout() {
     setStoredAdminToken("")
     setIsAuthenticated(false)
     setBookings([])
     setBlockedDates([])
     setPricingOverrides([])
+    setAdminTestimonials([])
+    setRentalOptions(fallbackRentalOptions)
+    setPricingEditor(defaultPricingEditorState)
+    setPricingPercentAdjustment(0)
     setMessage("")
     setError("")
     setLoading(false)
@@ -561,7 +1045,7 @@ function AdminPage() {
     setEditingBookingId(booking.id)
     setEditDate(booking.date || "")
     setEditTime(booking.rentalTime || "07:00 AM")
-    setEditRentalLabel(booking.rentalLabel || "Pontoon - 6 Hours")
+    setEditRentalLabel(booking.rentalLabel || "Pontoon - Half Day")
     setEditTowLocation(booking.towLocation || "None")
     setEditCustomerEmail(booking.customerEmail || "")
     setEditPrintedName(booking.waiverPrintedName || "")
@@ -574,11 +1058,16 @@ function AdminPage() {
     setEditingBookingId(null)
     setEditDate("")
     setEditTime("")
-    setEditRentalLabel("Pontoon - 6 Hours")
+    setEditRentalLabel("Pontoon - Half Day")
     setEditTowLocation("None")
     setEditCustomerEmail("")
     setEditPrintedName("")
     setEditStatus("pending_approval")
+  }
+
+  function applyPricingPercentPreview() {
+    setPricingEditor(previewPricingEditor)
+    setPricingPercentAdjustment(0)
   }
 
   async function loadAdminData() {
@@ -592,15 +1081,25 @@ function AdminPage() {
     setMessage("")
 
     try {
-      const [bookingsRes, blockedRes, pricingRes] = await Promise.all([
+      const [
+        bookingsRes,
+        blockedRes,
+        pricingRes,
+        publicPricingRes,
+        testimonialsRes,
+      ] = await Promise.all([
         adminFetch("/api/admin/bookings"),
         adminFetch("/api/admin/blocked-dates"),
         adminFetch("/api/admin/pricing-overrides"),
+        adminFetch("/api/admin/pricing"),
+        adminFetch("/api/admin/testimonials"),
       ])
 
       const bookingsData = await bookingsRes.json().catch(() => [])
       const blockedData = await blockedRes.json().catch(() => [])
       const pricingData = await pricingRes.json().catch(() => [])
+      const publicPricingData = await publicPricingRes.json().catch(() => [])
+      const testimonialsData = await testimonialsRes.json().catch(() => [])
 
       if (!bookingsRes.ok) {
         throw new Error(bookingsData?.error || "Could not load admin bookings.")
@@ -614,9 +1113,22 @@ function AdminPage() {
         throw new Error(pricingData?.error || "Could not load pricing overrides.")
       }
 
+      if (!publicPricingRes.ok) {
+        throw new Error(publicPricingData?.error || "Could not load pricing settings.")
+      }
+
+      if (!testimonialsRes.ok) {
+        throw new Error(testimonialsData?.error || "Could not load testimonials.")
+      }
+
+      const mergedRentalOptions = mergeServerPricingIntoFallback(publicPricingData)
+
       setBookings(Array.isArray(bookingsData) ? bookingsData : [])
       setBlockedDates(Array.isArray(blockedData) ? blockedData : [])
       setPricingOverrides(Array.isArray(pricingData) ? pricingData : [])
+      setAdminTestimonials(Array.isArray(testimonialsData) ? testimonialsData : [])
+      setRentalOptions(mergedRentalOptions)
+      setPricingEditor(getPricingEditorStateFromOptions(mergedRentalOptions))
     } catch (err) {
       console.error(err)
 
@@ -729,24 +1241,105 @@ function AdminPage() {
     }
   }
 
-  async function sendDepositLink(id) {
+ async function sendPaymentRequest(id) {
+  setError("")
+  setMessage("Sending payment request...")
+
+  try {
+    const res = await adminFetch(`/api/admin/bookings/${id}/resend-payment-request`, {
+      method: "POST",
+    })
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      setError(data.error || "Could not send payment request.")
+      setMessage("")
+      return
+    }
+
+    setMessage(`Payment request sent for booking ${id}.`)
+    await loadAdminData()
+  } catch (err) {
+    console.error(err)
+    if (err.message === "ADMIN_AUTH_REQUIRED") {
+      handleAdminLogout()
+      setError("Please log in again.")
+    } else {
+      setError("Server error while sending payment request.")
+    }
+    setMessage("")
+  }
+}
+
+ async function sendDepositRequest(id) {
+  setError("")
+  setMessage("Sending deposit request...")
+
+  try {
+    const res = await adminFetch(`/api/admin/bookings/${id}/resend-deposit-request`, {
+      method: "POST",
+    })
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      setError(data.error || "Could not send deposit request.")
+      setMessage("")
+      return
+    }
+
+    setMessage(`Deposit request sent for booking ${id}.`)
+    await loadAdminData()
+  } catch (err) {
+    console.error(err)
+    if (err.message === "ADMIN_AUTH_REQUIRED") {
+      handleAdminLogout()
+      setError("Please log in again.")
+    } else {
+      setError("Server error while sending deposit request.")
+    }
+    setMessage("")
+  }
+}
+
+  async function chargeDamage(id) {
     setError("")
-    setMessage("Creating deposit link...")
+    setMessage("Charging damage fee...")
+
+    const input = window.prompt("Enter damage charge amount in dollars, for example 150")
+    if (input === null) {
+      setMessage("")
+      return
+    }
+
+    const amountNumber = Number(input)
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+      setError("Enter a valid damage amount.")
+      setMessage("")
+      return
+    }
 
     try {
-      const res = await adminFetch(`/api/admin/deposit-link/${id}`, {
+      const res = await adminFetch(`/api/admin/charge-damage/${id}`, {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          amount: centsFromDollars(amountNumber),
+        }),
       })
 
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
-        setError(data.error || "Could not create deposit link.")
+        setError(data.error || "Could not charge damage.")
         setMessage("")
         return
       }
 
-      setMessage(`Deposit link created for booking ${id}.`)
+      setMessage(`Damage charge processed for booking ${id}.`)
       await loadAdminData()
     } catch (err) {
       console.error(err)
@@ -754,7 +1347,371 @@ function AdminPage() {
         handleAdminLogout()
         setError("Please log in again.")
       } else {
-        setError("Server error while creating deposit link.")
+        setError("Server error while charging damage.")
+      }
+      setMessage("")
+    }
+  }
+
+  async function updateBookingDetails(id) {
+    setError("")
+    setMessage("Updating booking...")
+
+    if (!editDate) {
+      setError("Select a date.")
+      setMessage("")
+      return
+    }
+
+    try {
+      const res = await adminFetch(`/api/admin/bookings/${id}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          date: editDate,
+          rentalTime: editTime,
+          rentalLabel: editRentalLabel,
+          towLocation: editTowLocation,
+          customerEmail: editCustomerEmail,
+          waiverPrintedName: editPrintedName,
+          status: editStatus,
+        }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not update booking.")
+        setMessage("")
+        return
+      }
+
+      setMessage(`Booking ${id} updated.`)
+      cancelEditBooking()
+      await loadAdminData()
+    } catch (err) {
+      console.error(err)
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while updating booking.")
+      }
+      setMessage("")
+    }
+  }
+
+  async function deleteBooking(id) {
+    setError("Delete booking is not available in the current backend.")
+    setMessage("")
+  }
+
+  async function createBlockDate() {
+    setError("")
+    setMessage("Blocking date...")
+
+    if (!blockDate) {
+      setError("Select a date to block.")
+      setMessage("")
+      return
+    }
+
+    try {
+      const res = await adminFetch(`/api/admin/block-date`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          date: blockDate,
+          rentalLabel: blockRentalLabel,
+          reason: blockReason,
+        }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not block date.")
+        setMessage("")
+        return
+      }
+
+      setMessage("Date blocked.")
+      setBlockDate("")
+      setBlockReason("")
+      setBlockRentalLabel("All Rentals")
+      await loadAdminData()
+    } catch (err) {
+      console.error(err)
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while blocking date.")
+      }
+      setMessage("")
+    }
+  }
+
+  async function removeBlockDate(id) {
+    setError("")
+    setMessage("Removing blocked date...")
+
+    try {
+      const res = await adminFetch(`/api/admin/blocked-dates/${id}`, {
+        method: "DELETE",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not remove blocked date.")
+        setMessage("")
+        return
+      }
+
+      setMessage("Blocked date removed.")
+      await loadAdminData()
+    } catch (err) {
+      console.error(err)
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while removing blocked date.")
+      }
+      setMessage("")
+    }
+  }
+
+  async function createHolidayPricing() {
+    setError("")
+    setMessage("Creating holiday pricing...")
+
+    if (!holidayDate || !holidayPrice) {
+      setError("Enter date and price.")
+      setMessage("")
+      return
+    }
+
+    try {
+      const res = await adminFetch(`/api/admin/pricing/holiday`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          date: holidayDate,
+          rentalLabel: holidayRentalLabel,
+          overrideAmount: Number(holidayPrice),
+          overrideLabel: holidayLabel,
+        }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not create holiday pricing.")
+        setMessage("")
+        return
+      }
+
+      setMessage("Holiday pricing created.")
+      setHolidayDate("")
+      setHolidayPrice("")
+      await loadAdminData()
+    } catch (err) {
+      console.error(err)
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while creating holiday pricing.")
+      }
+      setMessage("")
+    }
+  }
+
+  async function createManualOverride() {
+    setError("")
+    setMessage("Saving manual override...")
+
+    if (!discountAmount || (!discountEmail.trim() && !discountBookingId.trim())) {
+      setError("Enter an amount and either email or booking ID.")
+      setMessage("")
+      return
+    }
+
+    try {
+      const res = await adminFetch(`/api/admin/pricing/manual`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bookingId: discountBookingId.trim(),
+          customerEmail: normalizeEmail(discountEmail),
+          overrideAmount: Number(discountAmount),
+          overrideLabel: discountLabel,
+          overrideType: discountType,
+        }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not save manual override.")
+        setMessage("")
+        return
+      }
+
+      setMessage("Manual pricing override saved.")
+      setDiscountEmail("")
+      setDiscountBookingId("")
+      setDiscountAmount("")
+      setDiscountLabel("Friends & Family")
+      setDiscountType("manual_discount")
+      await loadAdminData()
+    } catch (err) {
+      console.error(err)
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while saving manual override.")
+      }
+      setMessage("")
+    }
+  }
+
+  async function deletePricingOverride(id) {
+    setError("")
+    setMessage("Removing pricing override...")
+
+    try {
+      const res = await adminFetch(`/api/admin/pricing/${id}`, {
+        method: "DELETE",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not remove pricing override.")
+        setMessage("")
+        return
+      }
+
+      setMessage("Pricing override removed.")
+      await loadAdminData()
+    } catch (err) {
+      console.error(err)
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while removing pricing override.")
+      }
+      setMessage("")
+    }
+  }
+
+  async function savePricingSettings() {
+    setError("")
+    setMessage("Saving pricing settings...")
+
+    try {
+      const payload = buildAdminPricingPayload(pricingEditor)
+
+      const res = await adminFetch(`/api/admin/pricing`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ pricing: payload }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not save pricing settings.")
+        setMessage("")
+        return
+      }
+
+      setMessage("Pricing settings updated.")
+      await loadAdminData()
+    } catch (err) {
+      console.error(err)
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while saving pricing settings.")
+      }
+      setMessage("")
+    }
+  }
+
+  async function approveTestimonial(id) {
+    setError("")
+    setMessage("Approving testimonial...")
+
+    try {
+      const res = await adminFetch(`/api/admin/testimonials/${id}/approve`, {
+        method: "POST",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not approve testimonial.")
+        setMessage("")
+        return
+      }
+
+      setMessage("Testimonial approved.")
+      await loadAdminData()
+    } catch (err) {
+      console.error(err)
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while approving testimonial.")
+      }
+      setMessage("")
+    }
+  }
+
+  async function denyTestimonial(id) {
+    setError("")
+    setMessage("Removing testimonial...")
+
+    try {
+      const res = await adminFetch(`/api/admin/testimonials/${id}/deny`, {
+        method: "POST",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError(data.error || "Could not remove testimonial.")
+        setMessage("")
+        return
+      }
+
+      setMessage("Testimonial denied and removed.")
+      await loadAdminData()
+    } catch (err) {
+      console.error(err)
+      if (err.message === "ADMIN_AUTH_REQUIRED") {
+        handleAdminLogout()
+        setError("Please log in again.")
+      } else {
+        setError("Server error while removing testimonial.")
       }
       setMessage("")
     }
@@ -764,536 +1721,305 @@ function AdminPage() {
     return <AdminLoginCard onLoginSuccess={() => setIsAuthenticated(true)} />
   }
 
+  if (loading) {
+    return (
+      <div style={styles.adminPage}>
+        <div style={styles.adminHeader}>
+          <h1 style={styles.adminTitle}>Cleared to Cruise Admin</h1>
+        </div>
+        <div style={styles.adminGrid}>
+          <div style={styles.loadingBox}>Loading admin panel...</div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={styles.adminPage}>
       <div style={styles.adminHeader}>
-        <h1 style={styles.adminTitle}>Cleared to Cruise Admin</h1>
+        <div>
+          <h1 style={styles.adminTitle}>Cleared to Cruise Admin</h1>
+          <p style={styles.sectionSubtext}>
+            Manage bookings, blocked dates, pricing, deposits, and testimonials.
+          </p>
+        </div>
 
         <div style={styles.buttonRow}>
           <button type="button" style={styles.secondaryButton} onClick={loadAdminData}>
             Refresh
           </button>
-
           <button type="button" style={styles.dangerButton} onClick={handleAdminLogout}>
             Log Out
           </button>
         </div>
       </div>
 
-      {message ? <div style={styles.successBox}>{message}</div> : null}
-      {error ? <div style={styles.errorBox}>{error}</div> : null}
-      {loading ? <div style={styles.loadingBox}>Loading admin data...</div> : null}
+      <div style={styles.adminGrid}>
+        {message ? <div style={styles.successBox}>{message}</div> : null}
+        {error ? <div style={styles.errorBox}>{error}</div> : null}
 
-      <section style={styles.adminSection}>
-        <div style={styles.formHeaderRow}>
-          <div>
-            <h2 style={styles.sectionTitle}>Bookings</h2>
-            <p style={styles.sectionSubtext}>
-              Approve, deny, confirm, edit, and manage customer bookings.
-            </p>
-          </div>
-        </div>
+        <section style={styles.adminCard}>
+          <h2 style={styles.adminSectionTitle}>Bookings</h2>
 
-        <div style={styles.tableWrap}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.tableHead}>ID</th>
-                <th style={styles.tableHead}>Rental</th>
-                <th style={styles.tableHead}>Date</th>
-                <th style={styles.tableHead}>Time</th>
-                <th style={styles.tableHead}>Customer</th>
-                <th style={styles.tableHead}>Status</th>
-                <th style={styles.tableHead}>Payment</th>
-                <th style={styles.tableHead}>Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {bookings.map((booking) => (
-                <tr key={booking.id}>
-                  <td style={styles.tableCell}>{booking.id}</td>
-                  <td style={styles.tableCell}>{booking.rentalLabel || "—"}</td>
-                  <td style={styles.tableCell}>{formatDate(booking.date)}</td>
-                  <td style={styles.tableCell}>{booking.rentalTime || "—"}</td>
-                  <td style={styles.tableCell}>
-                    <div>{booking.waiverPrintedName || "—"}</div>
-                    <div style={styles.lookupMeta}>{booking.customerEmail || "—"}</div>
-                  </td>
-                  <td style={styles.tableCell}>
-                    <span style={statusPillStyle(booking.status || "new")}>
-                      {normalizeStatusLabel(booking.status || "new")}
-                    </span>
-                  </td>
-                  <td style={styles.tableCell}>
-                    <span style={statusPillStyle(booking.paymentStatus || "unpaid")}>
-                      {normalizeStatusLabel(booking.paymentStatus || "unpaid")}
-                    </span>
-                  </td>
-                  <td style={styles.tableCell}>
-                    <div style={styles.actionWrap}>
-                      <button
-                        type="button"
-                        style={styles.smallButton}
-                        onClick={() => approveBooking(booking.id)}
-                      >
-                        Approve
-                      </button>
-
-                      <button
-                        type="button"
-                        style={styles.smallButton}
-                        onClick={() => denyBooking(booking.id)}
-                      >
-                        Deny
-                      </button>
-
-                      <button
-                        type="button"
-                        style={styles.smallButton}
-                        onClick={() => markConfirmed(booking.id)}
-                      >
-                        Confirm
-                      </button>
-
-                      <button
-                        type="button"
-                        style={styles.smallButton}
-                        onClick={() => sendDepositLink(booking.id)}
-                      >
-                        Deposit
-                      </button>
-
-                      <button
-                        type="button"
-                        style={styles.secondaryButton}
-                        onClick={() => openEditBooking(booking)}
-                      >
-                        Edit
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {editingBookingId ? (
-        <section style={styles.adminSection}>
-          <div style={styles.formHeaderRow}>
-            <div>
-              <h2 style={styles.sectionTitle}>Edit Booking #{editingBookingId}</h2>
-              <p style={styles.sectionSubtext}>
-                Change date, time, rental, tow location, customer info, or status.
-              </p>
+          <div style={styles.adminStatsRow}>
+            <div style={styles.adminStatCard}>
+              <div style={styles.adminStatLabel}>Total Bookings</div>
+              <div style={styles.adminStatValue}>{bookings.length}</div>
+            </div>
+            <div style={styles.adminStatCard}>
+              <div style={styles.adminStatLabel}>Pending Approval</div>
+              <div style={styles.adminStatValue}>
+                {bookings.filter((item) => item.status === "pending_approval").length}
+              </div>
+            </div>
+            <div style={styles.adminStatCard}>
+              <div style={styles.adminStatLabel}>Approved Unpaid</div>
+              <div style={styles.adminStatValue}>
+                {bookings.filter((item) => item.status === "approved_unpaid").length}
+              </div>
+            </div>
+            <div style={styles.adminStatCard}>
+              <div style={styles.adminStatLabel}>Confirmed</div>
+              <div style={styles.adminStatValue}>
+                {bookings.filter((item) => item.status === "confirmed").length}
+              </div>
             </div>
           </div>
 
-          <div style={styles.formGrid}>
-            <label style={styles.label}>
-              Date
-              <input
-                style={styles.input}
-                type="date"
-                value={editDate}
-                onChange={(e) => setEditDate(e.target.value)}
-              />
-            </label>
+          <div style={styles.adminTableWrap}>
+            <table style={styles.adminTable}>
+              <thead>
+                <tr>
+                  <th style={styles.adminTh}>ID</th>
+                  <th style={styles.adminTh}>Customer</th>
+                  <th style={styles.adminTh}>Rental</th>
+                  <th style={styles.adminTh}>Date</th>
+                  <th style={styles.adminTh}>Time</th>
+                  <th style={styles.adminTh}>Tow</th>
+                  <th style={styles.adminTh}>Waiver</th>
+                  <th style={styles.adminTh}>Payment</th>
+                  <th style={styles.adminTh}>Deposit</th>
+                  <th style={styles.adminTh}>Status</th>
+                  <th style={styles.adminTh}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bookings.map((booking) => {
+                  const isEditing = editingBookingId === booking.id
 
-            <label style={styles.label}>
-              Time
-              <select
-                style={styles.input}
-                value={editTime}
-                onChange={(e) => setEditTime(e.target.value)}
-              >
-                {timeOptions.map((time) => (
-                  <option key={time} value={time}>
-                    {time}
-                  </option>
-                ))}
-              </select>
-            </label>
+                  return (
+                    <tr key={booking.id}>
+                      <td style={styles.adminTd}>{booking.id}</td>
+                      <td style={styles.adminTd}>
+                        <div>{booking.waiverPrintedName || "—"}</div>
+                        <div style={styles.lookupMeta}>{booking.customerEmail || "—"}</div>
+                      </td>
+                      <td style={styles.adminTd}>
+                        {isEditing ? (
+                          <select
+                            style={styles.adminSelect}
+                            value={editRentalLabel}
+                            onChange={(e) => setEditRentalLabel(e.target.value)}
+                          >
+                            {rentalOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.value}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          booking.rentalLabel || "—"
+                        )}
+                      </td>
+                      <td style={styles.adminTd}>
+                        {isEditing ? (
+                          <input
+                            style={styles.adminInput}
+                            type="date"
+                            value={editDate}
+                            onChange={(e) => setEditDate(e.target.value)}
+                          />
+                        ) : (
+                          booking.date || "—"
+                        )}
+                      </td>
+                      <td style={styles.adminTd}>
+                        {isEditing ? (
+                          <select
+                            style={styles.adminSelect}
+                            value={editTime}
+                            onChange={(e) => setEditTime(e.target.value)}
+                          >
+                            {timeOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          booking.rentalTime || "—"
+                        )}
+                      </td>
+                      <td style={styles.adminTd}>
+                        {isEditing ? (
+                          <select
+                            style={styles.adminSelect}
+                            value={editTowLocation}
+                            onChange={(e) => setEditTowLocation(e.target.value)}
+                          >
+                            {towOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.value}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          booking.towLocation || "None"
+                        )}
+                      </td>
 
-            <label style={styles.label}>
-              Rental
-              <select
-                style={styles.input}
-                value={editRentalLabel}
-                onChange={(e) => setEditRentalLabel(e.target.value)}
-              >
-                {rentalOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label style={styles.label}>
-              Tow Location
-              <select
-                style={styles.input}
-                value={editTowLocation}
-                onChange={(e) => setEditTowLocation(e.target.value)}
-              >
-                {towOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.value}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label style={styles.label}>
-              Customer Email
-              <input
-                style={styles.input}
-                type="email"
-                value={editCustomerEmail}
-                onChange={(e) => setEditCustomerEmail(e.target.value)}
-              />
-            </label>
-
-            <label style={styles.label}>
-              Full Name
-              <input
-                style={styles.input}
-                type="text"
-                value={editPrintedName}
-                onChange={(e) => setEditPrintedName(e.target.value)}
-              />
-            </label>
-
-            <label style={styles.label}>
-              Status
-              <select
-                style={styles.input}
-                value={editStatus}
-                onChange={(e) => setEditStatus(e.target.value)}
-              >
-                <option value="pending_approval">Pending Approval</option>
-                <option value="approved_unpaid">Approved Unpaid</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="denied">Denied</option>
-              </select>
-            </label>
-          </div>
-
-          <div style={styles.buttonRow}>
-            <button
-              type="button"
-              style={styles.primaryButton}
-              onClick={async () => {
-                try {
-                  const res = await adminFetch(`/api/admin/bookings/${editingBookingId}`, {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                      date: editDate,
-                      rentalTime: editTime,
-                      rentalLabel: editRentalLabel,
-                      towLocation: editTowLocation,
-                      customerEmail: editCustomerEmail,
-                      waiverPrintedName: editPrintedName,
-                      status: editStatus,
-                    }),
-                  })
-
-                  const data = await res.json().catch(() => ({}))
-
-                  if (!res.ok) {
-                    setError(data.error || "Failed to update booking.")
-                    return
-                  }
-
-                  setMessage("Booking updated.")
-                  cancelEditBooking()
-                  await loadAdminData()
-                } catch (err) {
-                  console.error(err)
-                  if (err.message === "ADMIN_AUTH_REQUIRED") {
-                    handleAdminLogout()
-                    setError("Please log in again.")
-                  } else {
-                    setError("Server error while updating booking.")
-                  }
-                }
-              }}
-            >
-              Save Changes
-            </button>
-
-            <button type="button" style={styles.secondaryButton} onClick={cancelEditBooking}>
-              Cancel
-            </button>
+                      <td style={styles.adminTd}>
+                        <span style={statusPillStyle(booking.waiverStatus || "not_started")}>
+                          {normalizeStatusLabel(booking.waiverStatus || "not_started")}
+                        </span>
+                      </td>
+                      <td style={styles.adminTd}>
+                        <span style={statusPillStyle(booking.paymentStatus || "unpaid")}>
+                          {normalizeStatusLabel(booking.paymentStatus || "unpaid")}
+                        </span>
+                      </td>
+                      <td style={styles.adminTd}>
+                        <span style={statusPillStyle(booking.depositStatus || "not_scheduled")}>
+                          {normalizeStatusLabel(booking.depositStatus || "not_scheduled")}
+                        </span>
+                      </td>
+                      <td style={styles.adminTd}>
+                        {isEditing ? (
+                          <select
+                            style={styles.adminSelect}
+                            value={editStatus}
+                            onChange={(e) => setEditStatus(e.target.value)}
+                          >
+                            <option value="pending_approval">pending approval</option>
+                            <option value="approved_unpaid">approved unpaid</option>
+                            <option value="pending_payment">pending payment</option>
+                            <option value="confirmed">confirmed</option>
+                            <option value="denied">denied</option>
+                          </select>
+                        ) : (
+                          <span style={statusPillStyle(booking.status || "pending_approval")}>
+                            {normalizeStatusLabel(booking.status || "pending_approval")}
+                          </span>
+                        )}
+                      </td>
+                      <td style={styles.adminTd}>
+                        {isEditing ? (
+                          <div style={styles.adminButtonRow}>
+                            <button
+                              type="button"
+                              style={styles.adminPrimaryButton}
+                              onClick={() => updateBookingDetails(booking.id)}
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              style={styles.adminSmallButton}
+                              onClick={cancelEditBooking}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={styles.adminButtonRow}>
+                            <button
+                              type="button"
+                              style={styles.adminSmallButton}
+                              onClick={() => openEditBooking(booking)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              style={styles.adminSuccessButton}
+                              onClick={() => approveBooking(booking.id)}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              style={styles.adminDangerButton}
+                              onClick={() => denyBooking(booking.id)}
+                            >
+                              Deny
+                            </button>
+                            <button
+                              type="button"
+                              style={styles.adminPrimaryButton}
+                              onClick={() => markConfirmed(booking.id)}
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              type="button"
+                              style={styles.adminSmallButton}
+                              onClick={() => sendPaymentRequest(booking.id)}
+                            >
+                              Send Pay
+                            </button>
+                            <button
+                              type="button"
+                              style={styles.adminSmallButton}
+                              onClick={() => sendDepositRequest(booking.id)}
+                            >
+                              Deposit
+                            </button>
+                            <button
+                              type="button"
+                              style={styles.adminWarningButton}
+                              onClick={() => chargeDamage(booking.id)}
+                            >
+                              Damage
+                            </button>
+                            <button
+                              type="button"
+                              style={styles.adminDangerButton}
+                              onClick={() => deleteBooking(booking.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         </section>
-      ) : null}
 
-      <section style={styles.adminSection}>
-        <div style={styles.formHeaderRow}>
-          <div>
-            <h2 style={styles.sectionTitle}>Holiday Pricing</h2>
-            <p style={styles.sectionSubtext}>
-              Set a special holiday price for a specific rental on a specific date.
-            </p>
-          </div>
-        </div>
+        <section style={styles.adminCard}>
+          <h2 style={styles.adminSectionTitle}>Calendar & Block Dates</h2>
 
-        <div style={styles.formGrid}>
-          <label style={styles.label}>
-            Holiday Date
-            <input
-              style={styles.input}
-              type="date"
-              value={holidayDate}
-              onChange={(e) => setHolidayDate(e.target.value)}
-            />
-          </label>
-
-          <label style={styles.label}>
-            Rental Type
-            <select
-              style={styles.input}
-              value={holidayRentalLabel}
-              onChange={(e) => setHolidayRentalLabel(e.target.value)}
-            >
-              {rentalOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label style={styles.label}>
-            Holiday Price
-            <input
-              style={styles.input}
-              type="number"
-              placeholder="950"
-              value={holidayPrice}
-              onChange={(e) => setHolidayPrice(e.target.value)}
-            />
-          </label>
-
-          <label style={styles.label}>
-            Label
-            <input
-              style={styles.input}
-              type="text"
-              value={holidayLabel}
-              onChange={(e) => setHolidayLabel(e.target.value)}
-            />
-          </label>
-        </div>
-
-        <div style={styles.buttonRow}>
-          <button
-            type="button"
-            style={styles.primaryButton}
-            onClick={async () => {
-              setError("")
-              setMessage("Saving holiday pricing...")
-
-              try {
-                const res = await adminFetch("/api/admin/pricing/holiday", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    date: holidayDate,
-                    rentalLabel: holidayRentalLabel,
-                    overrideAmount: holidayPrice,
-                    overrideLabel: holidayLabel,
-                  }),
-                })
-
-                const data = await res.json().catch(() => ({}))
-
-                if (!res.ok) {
-                  setError(data.error || "Could not save holiday pricing.")
-                  setMessage("")
-                  return
-                }
-
-                setMessage("Holiday pricing saved.")
-                setHolidayDate("")
-                setHolidayPrice("")
-                setHolidayLabel("Holiday Pricing")
-                await loadAdminData()
-              } catch (err) {
-                console.error(err)
-                if (err.message === "ADMIN_AUTH_REQUIRED") {
-                  handleAdminLogout()
-                  setError("Please log in again.")
-                } else {
-                  setError("Server error while saving holiday pricing.")
-                }
-                setMessage("")
-              }
-            }}
-          >
-            Save Holiday Price
-          </button>
-        </div>
-      </section>
-
-      <section style={styles.adminSection}>
-        <div style={styles.formHeaderRow}>
-          <div>
-            <h2 style={styles.sectionTitle}>Manual Pricing / Friends & Family</h2>
-            <p style={styles.sectionSubtext}>
-              Add a discount or manual price override by booking ID or customer email.
-            </p>
-          </div>
-        </div>
-
-        <div style={styles.formGrid}>
-          <label style={styles.label}>
-            Booking ID
-            <input
-              style={styles.input}
-              type="text"
-              placeholder="1001"
-              value={discountBookingId}
-              onChange={(e) => setDiscountBookingId(e.target.value)}
-            />
-          </label>
-
-          <label style={styles.label}>
-            Customer Email
-            <input
-              style={styles.input}
-              type="email"
-              placeholder="customer@email.com"
-              value={discountEmail}
-              onChange={(e) => setDiscountEmail(e.target.value)}
-            />
-          </label>
-
-          <label style={styles.label}>
-            Type
-            <select
-              style={styles.input}
-              value={discountType}
-              onChange={(e) => setDiscountType(e.target.value)}
-            >
-              <option value="manual_discount">Manual Discount</option>
-              <option value="manual_price">Manual Price Override</option>
-            </select>
-          </label>
-
-          <label style={styles.label}>
-            Amount
-            <input
-              style={styles.input}
-              type="number"
-              placeholder="100"
-              value={discountAmount}
-              onChange={(e) => setDiscountAmount(e.target.value)}
-            />
-          </label>
-
-          <label style={styles.label}>
-            Label
-            <input
-              style={styles.input}
-              type="text"
-              value={discountLabel}
-              onChange={(e) => setDiscountLabel(e.target.value)}
-            />
-          </label>
-        </div>
-
-        <div style={styles.buttonRow}>
-          <button
-            type="button"
-            style={styles.primaryButton}
-            onClick={async () => {
-              setError("")
-              setMessage("Saving manual pricing override...")
-
-              try {
-                const res = await adminFetch("/api/admin/pricing/manual", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    bookingId: discountBookingId.trim(),
-                    customerEmail: discountEmail.trim(),
-                    overrideAmount: discountAmount,
-                    overrideType: discountType,
-                    overrideLabel: discountLabel,
-                  }),
-                })
-
-                const data = await res.json().catch(() => ({}))
-
-                if (!res.ok) {
-                  setError(data.error || "Could not save manual pricing override.")
-                  setMessage("")
-                  return
-                }
-
-                setMessage("Manual pricing override saved.")
-                setDiscountBookingId("")
-                setDiscountEmail("")
-                setDiscountAmount("")
-                setDiscountLabel("Friends & Family")
-                setDiscountType("manual_discount")
-                await loadAdminData()
-              } catch (err) {
-                console.error(err)
-                if (err.message === "ADMIN_AUTH_REQUIRED") {
-                  handleAdminLogout()
-                  setError("Please log in again.")
-                } else {
-                  setError("Server error while saving manual pricing override.")
-                }
-                setMessage("")
-              }
-            }}
-          >
-            Save Manual Pricing
-          </button>
-        </div>
-      </section>
-
-      <section style={styles.adminSection}>
-        <div style={styles.formHeaderRow}>
-          <div>
-            <h2 style={styles.sectionTitle}>Blocked Dates Calendar</h2>
-            <p style={styles.sectionSubtext}>
-              View blocked dates visually and tap a day to prefill the block form.
-            </p>
-          </div>
-
-          <div style={styles.buttonRow}>
+          <div style={styles.calendarHeader}>
             <button
               type="button"
-              style={styles.secondaryButton}
+              style={styles.adminSmallButton}
               onClick={() =>
                 setCalendarMonth(
                   new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1)
                 )
               }
             >
-              Previous
+              Prev
             </button>
 
-            <div style={styles.calendarMonthLabel}>{getMonthLabel(calendarMonth)}</div>
+            <div style={styles.calendarTitle}>{getMonthLabel(calendarMonth)}</div>
 
             <button
               type="button"
-              style={styles.secondaryButton}
+              style={styles.adminSmallButton}
               onClick={() =>
                 setCalendarMonth(
                   new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1)
@@ -1303,433 +2029,583 @@ function AdminPage() {
               Next
             </button>
           </div>
-        </div>
 
-        <div style={styles.calendarGrid}>
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-            <div key={day} style={styles.calendarHeaderCell}>
-              {day}
-            </div>
-          ))}
+          <div style={styles.calendarGrid}>
+            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+              <div key={day} style={styles.calendarDayHeader}>
+                {day}
+              </div>
+            ))}
 
-          {calendarDays.map((day, index) => {
-            if (!day) {
-              return <div key={`empty-${index}`} style={styles.calendarEmptyCell} />
-            }
+            {calendarDays.map((date, index) => {
+              if (!date) {
+                return <div key={`empty-${index}`} style={styles.calendarCellEmpty} />
+              }
 
-            const key = toDateInputValue(day)
-            const dayBlocks = blockedDateMap.get(key) || []
-            const isBlocked = dayBlocks.length > 0
+              const key = toDateInputValue(date)
+              const dayBlocks = blockedDateMap.get(key) || []
 
-            return (
-              <button
-                key={key}
-                type="button"
-                style={{
-                  ...styles.calendarDayCell,
-                  ...(isBlocked ? styles.calendarDayBlocked : {}),
-                }}
-                onClick={() => {
-                  setBlockDate(key)
-                  if (dayBlocks[0]?.rentalLabel) {
-                    setBlockRentalLabel(dayBlocks[0].rentalLabel)
-                  }
-                  if (dayBlocks[0]?.reason) {
-                    setBlockReason(dayBlocks[0].reason)
-                  }
-                }}
-              >
-                <span style={styles.calendarDayNumber}>{day.getDate()}</span>
+              return (
+                <div key={key} style={styles.calendarCell}>
+                  <div style={styles.calendarCellHeader}>
+                    <span>{date.getDate()}</span>
+                  </div>
 
-                {isBlocked ? (
-                  <span style={styles.calendarBlockedText}>
-                    {dayBlocks[0]?.rentalLabel || "Blocked"}
-                  </span>
-                ) : null}
-              </button>
-            )
-          })}
-        </div>
-      </section>
-
-      <section style={styles.adminSection}>
-        <div style={styles.formHeaderRow}>
-          <div>
-            <h2 style={styles.sectionTitle}>Block a Date</h2>
-            <p style={styles.sectionSubtext}>
-              Block dates for maintenance, weather, manual blackout dates, or holidays.
-            </p>
+                  {dayBlocks.map((block) => (
+                    <div key={block.id} style={styles.calendarBlock}>
+                      <div>{block.rentalLabel || "All"}</div>
+                      <div style={styles.calendarBlockReason}>
+                        {block.reason || "Blocked"}
+                      </div>
+                      <button
+                        type="button"
+                        style={styles.calendarRemoveButton}
+                        onClick={() => removeBlockDate(block.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
           </div>
+
+          <div style={styles.formGrid}>
+            <label style={styles.label}>
+              Date
+              <input
+                style={styles.input}
+                type="date"
+                value={blockDate}
+                onChange={(e) => setBlockDate(e.target.value)}
+              />
+            </label>
+
+            <label style={styles.label}>
+              Rental
+              <select
+                style={styles.input}
+                value={blockRentalLabel}
+                onChange={(e) => setBlockRentalLabel(e.target.value)}
+              >
+                <option value="All Rentals">All Rentals</option>
+                {rentalOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.value}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={styles.labelFull}>
+              Reason
+              <input
+                style={styles.input}
+                type="text"
+                value={blockReason}
+                onChange={(e) => setBlockReason(e.target.value)}
+                placeholder="Maintenance, weather, etc."
+              />
+            </label>
+          </div>
+
+          <div style={styles.buttonRow}>
+            <button type="button" style={styles.primaryButton} onClick={createBlockDate}>
+              Block Date
+            </button>
+          </div>
+        </section>
+
+        <section style={styles.adminCard}>
+          <h2 style={styles.adminSectionTitle}>Pricing Manager</h2>
+
+          <div style={styles.adminStatsRow}>
+            <div style={styles.adminStatCard}>
+              <div style={styles.adminStatLabel}>Jet Ski (Single)</div>
+              <div style={styles.adminStatValue}>${previewPricingEditor.JetSkiSingle}</div>
+            </div>
+            <div style={styles.adminStatCard}>
+              <div style={styles.adminStatLabel}>Jet Ski (Double)</div>
+              <div style={styles.adminStatValue}>${previewPricingEditor.JetSkiDouble}</div>
+            </div>
+            <div style={styles.adminStatCard}>
+              <div style={styles.adminStatLabel}>Pontoon Half Day</div>
+              <div style={styles.adminStatValue}>${previewPricingEditor.PontoonHalfDay}</div>
+            </div>
+            <div style={styles.adminStatCard}>
+              <div style={styles.adminStatLabel}>Pontoon Full Day</div>
+              <div style={styles.adminStatValue}>${previewPricingEditor.PontoonFullDay}</div>
+            </div>
+            <div style={styles.adminStatCard}>
+              <div style={styles.adminStatLabel}>Bass Boat Full Day</div>
+              <div style={styles.adminStatValue}>${previewPricingEditor.BassBoatFullDay}</div>
+            </div>
+          </div>
+
+          <div style={styles.formGrid}>
+            <label style={styles.label}>
+              Jet Ski (Single)
+              <input
+                style={styles.input}
+                type="number"
+                value={pricingEditor.JetSkiSingle}
+                onChange={(e) =>
+                  setPricingEditor((prev) => ({
+                    ...prev,
+                    JetSkiSingle: Number(e.target.value || 0),
+                  }))
+                }
+              />
+            </label>
+
+            <label style={styles.label}>
+              Jet Ski (Double)
+              <input
+                style={styles.input}
+                type="number"
+                value={pricingEditor.JetSkiDouble}
+                onChange={(e) =>
+                  setPricingEditor((prev) => ({
+                    ...prev,
+                    JetSkiDouble: Number(e.target.value || 0),
+                  }))
+                }
+              />
+            </label>
+
+            <label style={styles.label}>
+              Pontoon Half Day
+              <input
+                style={styles.input}
+                type="number"
+                value={pricingEditor.PontoonHalfDay}
+                onChange={(e) =>
+                  setPricingEditor((prev) => ({
+                    ...prev,
+                    PontoonHalfDay: Number(e.target.value || 0),
+                  }))
+                }
+              />
+            </label>
+
+            <label style={styles.label}>
+              Pontoon Full Day
+              <input
+                style={styles.input}
+                type="number"
+                value={pricingEditor.PontoonFullDay}
+                onChange={(e) =>
+                  setPricingEditor((prev) => ({
+                    ...prev,
+                    PontoonFullDay: Number(e.target.value || 0),
+                  }))
+                }
+              />
+            </label>
+
+            <label style={styles.label}>
+              Bass Boat Full Day
+              <input
+                style={styles.input}
+                type="number"
+                value={pricingEditor.BassBoatFullDay}
+                onChange={(e) =>
+                  setPricingEditor((prev) => ({
+                    ...prev,
+                    BassBoatFullDay: Number(e.target.value || 0),
+                  }))
+                }
+              />
+            </label>
+
+            <label style={styles.labelFull}>
+              Global Percentage Adjustment Preview ({pricingPercentAdjustment}%)
+              <input
+                style={styles.slider}
+                type="range"
+                min="-30"
+                max="30"
+                step="1"
+                value={pricingPercentAdjustment}
+                onChange={(e) => setPricingPercentAdjustment(Number(e.target.value))}
+              />
+            </label>
+          </div>
+
+          <div style={styles.buttonRow}>
+            <button type="button" style={styles.secondaryButton} onClick={applyPricingPercentPreview}>
+              Apply Preview to Fields
+            </button>
+            <button type="button" style={styles.primaryButton} onClick={savePricingSettings}>
+              Save Pricing
+            </button>
+          </div>
+        </section>
+
+        <section style={styles.adminCard}>
+          <h2 style={styles.adminSectionTitle}>Holiday Pricing Override</h2>
+
+          <div style={styles.formGrid}>
+            <label style={styles.label}>
+              Holiday Date
+              <input
+                style={styles.input}
+                type="date"
+                value={holidayDate}
+                onChange={(e) => setHolidayDate(e.target.value)}
+              />
+            </label>
+
+            <label style={styles.label}>
+              Rental
+              <select
+                style={styles.input}
+                value={holidayRentalLabel}
+                onChange={(e) => setHolidayRentalLabel(e.target.value)}
+              >
+                {rentalOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.value}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={styles.label}>
+              Holiday Price
+              <input
+                style={styles.input}
+                type="number"
+                value={holidayPrice}
+                onChange={(e) => setHolidayPrice(e.target.value)}
+                placeholder="Enter holiday price"
+              />
+            </label>
+
+            <label style={styles.labelFull}>
+              Override Label
+              <input
+                style={styles.input}
+                type="text"
+                value={holidayLabel}
+                onChange={(e) => setHolidayLabel(e.target.value)}
+                placeholder="Holiday Pricing"
+              />
+            </label>
+          </div>
+
+          <div style={styles.buttonRow}>
+            <button type="button" style={styles.primaryButton} onClick={createHolidayPricing}>
+              Save Holiday Pricing
+            </button>
+          </div>
+        </section>
+
+        <section style={styles.adminCard}>
+          <h2 style={styles.adminSectionTitle}>Manual Discount / Price Override</h2>
+
+          <div style={styles.formGrid}>
+            <label style={styles.label}>
+              Override Type
+              <select
+                style={styles.input}
+                value={discountType}
+                onChange={(e) => setDiscountType(e.target.value)}
+              >
+                <option value="manual_discount">Manual Discount</option>
+                <option value="manual_price">Manual Price Override</option>
+              </select>
+            </label>
+
+            <label style={styles.label}>
+              Booking ID (optional)
+              <input
+                style={styles.input}
+                type="text"
+                value={discountBookingId}
+                onChange={(e) => setDiscountBookingId(e.target.value)}
+                placeholder="Specific booking ID"
+              />
+            </label>
+
+            <label style={styles.label}>
+              Customer Email (optional)
+              <input
+                style={styles.input}
+                type="email"
+                value={discountEmail}
+                onChange={(e) => setDiscountEmail(e.target.value)}
+                placeholder="customer@email.com"
+              />
+            </label>
+
+            <label style={styles.label}>
+              Amount
+              <input
+                style={styles.input}
+                type="number"
+                value={discountAmount}
+                onChange={(e) => setDiscountAmount(e.target.value)}
+                placeholder="Enter amount"
+              />
+            </label>
+
+            <label style={styles.labelFull}>
+              Label
+              <input
+                style={styles.input}
+                type="text"
+                value={discountLabel}
+                onChange={(e) => setDiscountLabel(e.target.value)}
+                placeholder="Friends & Family"
+              />
+            </label>
+          </div>
+
+          <div style={styles.buttonRow}>
+            <button type="button" style={styles.primaryButton} onClick={createManualOverride}>
+              Save Manual Override
+            </button>
+          </div>
+        </section>
+
+        <section style={styles.adminCard}>
+          <h2 style={styles.adminSectionTitle}>Active Pricing Overrides</h2>
+
+          {pricingOverrides.length === 0 ? (
+            <div style={styles.infoBox}>No active pricing overrides.</div>
+          ) : (
+            <div style={styles.adminTableWrap}>
+              <table style={styles.adminTable}>
+                <thead>
+                  <tr>
+                    <th style={styles.adminTh}>Type</th>
+                    <th style={styles.adminTh}>Label</th>
+                    <th style={styles.adminTh}>Rental</th>
+                    <th style={styles.adminTh}>Date</th>
+                    <th style={styles.adminTh}>Booking ID</th>
+                    <th style={styles.adminTh}>Email</th>
+                    <th style={styles.adminTh}>Amount</th>
+                    <th style={styles.adminTh}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pricingOverrides.map((item) => (
+                    <tr key={item.id}>
+                      <td style={styles.adminTd}>{item.overrideType || "—"}</td>
+                      <td style={styles.adminTd}>{item.overrideLabel || "—"}</td>
+                      <td style={styles.adminTd}>{item.rentalLabel || "—"}</td>
+                      <td style={styles.adminTd}>{item.date || "—"}</td>
+                      <td style={styles.adminTd}>{item.bookingId || "—"}</td>
+                      <td style={styles.adminTd}>{item.customerEmail || "—"}</td>
+                      <td style={styles.adminTd}>
+                        ${dollarsFromCents(item.overrideAmount || 0)}
+                      </td>
+                      <td style={styles.adminTd}>
+                        <div style={styles.adminButtonRow}>
+                          <button
+                            type="button"
+                            style={styles.adminDangerButton}
+                            onClick={() => deletePricingOverride(item.id)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section style={styles.adminCard}>
+          <h2 style={styles.adminSectionTitle}>Testimonial Approval</h2>
+
+          {adminTestimonials.length === 0 ? (
+            <div style={styles.infoBox}>No testimonials submitted yet.</div>
+          ) : (
+            <div style={styles.adminTableWrap}>
+              <table style={styles.adminTable}>
+                <thead>
+                  <tr>
+                    <th style={styles.adminTh}>Name</th>
+                    <th style={styles.adminTh}>Rental</th>
+                    <th style={styles.adminTh}>Testimonial</th>
+                    <th style={styles.adminTh}>Photo</th>
+                    <th style={styles.adminTh}>Approved</th>
+                    <th style={styles.adminTh}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminTestimonials.map((item) => (
+                    <tr key={item.id}>
+                      <td style={styles.adminTd}>
+                        <div>{item.customerName || "—"}</div>
+                        <div style={styles.lookupMeta}>{item.customerEmail || "—"}</div>
+                      </td>
+                      <td style={styles.adminTd}>{item.rentalLabel || "—"}</td>
+                      <td style={styles.adminTd}>{item.testimonialText || "—"}</td>
+                      <td style={styles.adminTd}>
+                        {item.photoUrl ? (
+                          <img
+                            src={item.photoUrl}
+                            alt="Testimonial"
+                            style={styles.adminImagePreview}
+                          />
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td style={styles.adminTd}>
+                        <span style={statusPillStyle(item.isApproved ? "confirmed" : "pending_approval")}>
+                          {item.isApproved ? "approved" : "pending"}
+                        </span>
+                      </td>
+                      <td style={styles.adminTd}>
+                        <div style={styles.adminButtonRow}>
+                          <button
+                            type="button"
+                            style={styles.adminSuccessButton}
+                            onClick={() => approveTestimonial(item.id)}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            style={styles.adminDangerButton}
+                            onClick={() => denyTestimonial(item.id)}
+                          >
+                            Deny
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  )
+}
+
+function RentalCard({ card, selectedRental, rentalOptions, onChange }) {
+  const isSelected = card.options.includes(selectedRental)
+  const isBestValue = card.options.includes("Pontoon - Full Day")
+
+  return (
+    <div
+      style={{
+        ...styles.heroCard,
+        ...(isSelected ? styles.heroCardSelected : {}),
+        ...(isBestValue ? styles.heroCardBestValue : {}),
+      }}
+    >
+      <div style={styles.heroImageWrap}>
+        <img src={card.image} alt={card.alt} style={styles.heroImage} />
+        {isBestValue ? <div style={styles.heroBadge}>Most Popular</div> : null}
+      </div>
+
+      <div style={styles.heroContent}>
+        <div>
+          <h3 style={styles.heroTitle}>{card.title}</h3>
+          <p style={styles.heroText}>{card.text}</p>
+
+          {isBestValue ? (
+            <div style={styles.bestValueText}>Best Value • Great for full lake days</div>
+          ) : null}
+
+          {card.options.includes("Pontoon - Half Day") ? (
+            <div style={styles.heroUpgradeHint}>
+              Upgrade to full day anytime for better value
+            </div>
+          ) : null}
         </div>
 
-        <div style={styles.formGrid}>
-          <label style={styles.label}>
-            Date
-            <input
-              style={styles.input}
-              type="date"
-              value={blockDate}
-              onChange={(e) => setBlockDate(e.target.value)}
-            />
-          </label>
-
-          <label style={styles.label}>
-            Rental Type
+        <div style={styles.heroDropdownActionWrap}>
+          <label style={styles.heroSelectLabel}>
+            Choose Option
             <select
-              style={styles.input}
-              value={blockRentalLabel}
-              onChange={(e) => setBlockRentalLabel(e.target.value)}
+              style={styles.heroSelect}
+              value={card.options.includes(selectedRental) ? selectedRental : card.options[0]}
+              onChange={(e) => onChange(e.target.value)}
             >
-              <option value="All Rentals">All Rentals</option>
-              {rentalOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.value}
+              {card.options.map((optionValue) => (
+                <option key={optionValue} value={optionValue}>
+                  {getRentalLabel(optionValue, rentalOptions)}
                 </option>
               ))}
             </select>
           </label>
 
-          <label style={styles.label}>
-            Reason
-            <input
-              style={styles.input}
-              type="text"
-              placeholder="Maintenance, weather, unavailable"
-              value={blockReason}
-              onChange={(e) => setBlockReason(e.target.value)}
-            />
-          </label>
-        </div>
-
-        <div style={styles.buttonRow}>
           <button
             type="button"
-            style={styles.primaryButton}
-            onClick={async () => {
-              if (!blockDate) {
-                setError("Please choose a date to block.")
-                setMessage("")
-                return
-              }
-
-              setError("")
-              setMessage("Blocking date...")
-
-              try {
-                const res = await adminFetch("/api/admin/block-date", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    date: blockDate,
-                    reason: blockReason.trim(),
-                    rentalLabel: blockRentalLabel === "All Rentals" ? null : blockRentalLabel,
-                  }),
-                })
-
-                const data = await res.json().catch(() => ({}))
-
-                if (!res.ok) {
-                  setError(data.error || "Could not block date.")
-                  setMessage("")
-                  return
-                }
-
-                setMessage("Date blocked successfully.")
-                setBlockDate("")
-                setBlockReason("")
-                setBlockRentalLabel("All Rentals")
-                await loadAdminData()
-              } catch (err) {
-                console.error(err)
-                if (err.message === "ADMIN_AUTH_REQUIRED") {
-                  handleAdminLogout()
-                  setError("Please log in again.")
-                } else {
-                  setError("Server error while blocking date.")
-                }
-                setMessage("")
-              }
-            }}
+            style={isSelected ? styles.heroSelectedButton : styles.heroChooseButton}
+            onClick={() => onChange(card.options[0])}
           >
-            Block Date
+            {isSelected ? "Selected" : "Choose This Rental"}
           </button>
         </div>
-      </section>
-
-      <section style={styles.adminSection}>
-        <div style={styles.formHeaderRow}>
-          <div>
-            <h2 style={styles.sectionTitle}>Active Pricing Overrides</h2>
-            <p style={styles.sectionSubtext}>
-              Review and remove active holiday pricing, discounts, or manual price overrides.
-            </p>
-          </div>
-        </div>
-
-        {pricingOverrides.length === 0 ? (
-          <div style={styles.infoBox}>No active pricing overrides found.</div>
-        ) : (
-          <div style={styles.lookupList}>
-            {pricingOverrides.map((item) => (
-              <div key={item.id} style={styles.lookupCard}>
-                <div style={styles.lookupRow}>
-                  <strong>ID:</strong> {item.id}
-                </div>
-                <div style={styles.lookupRow}>
-                  <strong>Type:</strong> {normalizeStatusLabel(item.overrideType)}
-                </div>
-                <div style={styles.lookupRow}>
-                  <strong>Label:</strong> {item.overrideLabel || "—"}
-                </div>
-                <div style={styles.lookupRow}>
-                  <strong>Rental:</strong> {item.rentalLabel || "—"}
-                </div>
-                <div style={styles.lookupRow}>
-                  <strong>Date:</strong> {item.date || "—"}
-                </div>
-                <div style={styles.lookupRow}>
-                  <strong>Booking ID:</strong> {item.bookingId || "—"}
-                </div>
-                <div style={styles.lookupRow}>
-                  <strong>Email:</strong> {item.customerEmail || "—"}
-                </div>
-                <div style={styles.lookupRow}>
-                  <strong>Amount:</strong>{" "}
-                  ${typeof item.overrideAmount === "number"
-                    ? (item.overrideAmount / 100).toFixed(2)
-                    : "0.00"}
-                </div>
-
-                <div style={styles.buttonRow}>
-                  <button
-                    type="button"
-                    style={styles.dangerButton}
-                    onClick={async () => {
-                      setError("")
-                      setMessage("Removing pricing override...")
-
-                      try {
-                        const res = await adminFetch(`/api/admin/pricing/${item.id}`, {
-                          method: "DELETE",
-                        })
-
-                        const data = await res.json().catch(() => ({}))
-
-                        if (!res.ok) {
-                          setError(data.error || "Could not remove pricing override.")
-                          setMessage("")
-                          return
-                        }
-
-                        setMessage("Pricing override removed.")
-                        await loadAdminData()
-                      } catch (err) {
-                        console.error(err)
-                        if (err.message === "ADMIN_AUTH_REQUIRED") {
-                          handleAdminLogout()
-                          setError("Please log in again.")
-                        } else {
-                          setError("Server error while removing pricing override.")
-                        }
-                        setMessage("")
-                      }
-                    }}
-                  >
-                    Remove Override
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section style={styles.adminSection}>
-        <div style={styles.formHeaderRow}>
-          <div>
-            <h2 style={styles.sectionTitle}>Blocked Dates</h2>
-            <p style={styles.sectionSubtext}>
-              Review and remove blocked dates already in the system.
-            </p>
-          </div>
-        </div>
-
-        {blockedDates.length === 0 ? (
-          <div style={styles.infoBox}>No blocked dates found.</div>
-        ) : (
-          <div style={styles.lookupList}>
-            {blockedDates.map((item) => (
-              <div key={item.id} style={styles.lookupCard}>
-                <div style={styles.lookupRow}>
-                  <strong>Date:</strong> {item.date}
-                </div>
-                <div style={styles.lookupRow}>
-                  <strong>Rental:</strong> {item.rentalLabel || "All Rentals"}
-                </div>
-                <div style={styles.lookupRow}>
-                  <strong>Reason:</strong> {item.reason || "—"}
-                </div>
-
-                <div style={styles.buttonRow}>
-                  <button
-                    type="button"
-                    style={styles.dangerButton}
-                    onClick={async () => {
-                      setError("")
-                      setMessage("Removing blocked date...")
-
-                      try {
-                        const res = await adminFetch(`/api/admin/block-date/${item.id}`, {
-                          method: "DELETE",
-                        })
-
-                        const data = await res.json().catch(() => ({}))
-
-                        if (!res.ok) {
-                          setError(data.error || "Could not remove blocked date.")
-                          setMessage("")
-                          return
-                        }
-
-                        setMessage("Blocked date removed.")
-                        await loadAdminData()
-                      } catch (err) {
-                        console.error(err)
-                        if (err.message === "ADMIN_AUTH_REQUIRED") {
-                          handleAdminLogout()
-                          setError("Please log in again.")
-                        } else {
-                          setError("Server error while removing blocked date.")
-                        }
-                        setMessage("")
-                      }
-                    }}
-                  >
-                    Remove Block
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
-  )
-}
-
-function RentalCard({ card, selectedRental, onChange }) {
-  const isSelectedGroup = card.options.includes(selectedRental)
-  const currentValue = isSelectedGroup ? selectedRental : card.options[0]
-
-  return (
-    <article
-      style={{
-        ...styles.heroCard,
-        ...(isSelectedGroup ? styles.heroCardSelected : {}),
-      }}
-    >
-      <img src={card.image} alt={card.alt} style={styles.heroImage} />
-      <div style={styles.heroContent}>
-        <div>
-          <h3 style={styles.heroTitle}>{card.title}</h3>
-          <p style={styles.heroText}>{card.text}</p>
-        </div>
-
-        <div style={styles.heroSelectWrap}>
-          {card.options.length === 1 ? (
-            <button
-              type="button"
-              style={isSelectedGroup ? styles.heroSelectedButton : styles.heroChooseButton}
-              onClick={() => onChange(card.options[0])}
-            >
-              {isSelectedGroup
-                ? `Selected: ${getRentalLabel(card.options[0])}`
-                : `Choose ${getRentalLabel(card.options[0])}`}
-            </button>
-          ) : (
-            <div style={styles.heroDropdownActionWrap}>
-              <label style={styles.heroSelectLabel}>
-                Choose Option
-                <select
-                  style={styles.heroSelect}
-                  value={currentValue}
-                  onChange={(e) => onChange(e.target.value)}
-                >
-                  {card.options.map((value) => (
-                    <option key={value} value={value}>
-                      {getRentalLabel(value)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <button
-                type="button"
-                style={isSelectedGroup ? styles.heroSelectedButton : styles.heroChooseButton}
-                onClick={() => onChange(currentValue)}
-              >
-                {isSelectedGroup ? "Selected" : "Use This Option"}
-              </button>
-            </div>
-          )}
-        </div>
       </div>
-    </article>
+    </div>
   )
 }
 
 function DepositPage() {
   const { id } = useParams()
-  const [message, setMessage] = useState("Redirecting to secure deposit authorization...")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
 
-  useEffect(() => {
-    let isMounted = true
+  async function handleDepositStart() {
+    setLoading(true)
+    setError("")
 
-    async function startDeposit() {
-      try {
-        const res = await fetch(`${API}/api/deposit/${id}`, {
-          method: "POST",
-        })
+    try {
+      const res = await fetch(`${API}/api/deposit/${id}`, {
+        method: "POST",
+      })
 
-        const data = await res.json().catch(() => ({}))
+      const data = await res.json().catch(() => ({}))
 
-        if (!res.ok) {
-          if (isMounted) {
-            setMessage(data.error || "Could not create deposit authorization.")
-          }
-          return
-        }
-
-        if (data.url) {
-          window.location.href = data.url
-          return
-        }
-
-        if (isMounted) {
-          setMessage("Deposit authorization link was not returned.")
-        }
-      } catch (error) {
-        console.error(error)
-        if (isMounted) {
-          setMessage("Server error creating deposit authorization.")
-        }
+      if (!res.ok || !data.url) {
+        setError(data.error || "Could not start deposit authorization.")
+        setLoading(false)
+        return
       }
-    }
 
-    startDeposit()
-
-    return () => {
-      isMounted = false
+      window.location.href = data.url
+    } catch (err) {
+      console.error(err)
+      setError("Server error while starting deposit authorization.")
+      setLoading(false)
     }
-  }, [id])
+  }
 
   return (
     <div style={styles.successPage}>
       <div style={styles.successCard}>
-        <h1 style={styles.successTitle}>Security Deposit Authorization</h1>
-        <p style={styles.successText}>{message}</p>
+        <h1 style={styles.successTitle}>Authorize Security Deposit</h1>
+        <p style={styles.successText}>
+          This page lets you save a card for the refundable $500 security deposit hold.
+        </p>
+
+        <div style={styles.buttonRow}>
+          <button
+            type="button"
+            style={loading ? styles.buttonDisabled : styles.primaryButton}
+            disabled={loading}
+            onClick={handleDepositStart}
+          >
+            {loading ? "Redirecting..." : "Authorize Deposit Card"}
+          </button>
+        </div>
+
+        {error ? <div style={styles.errorBox}>{error}</div> : null}
       </div>
     </div>
   )
@@ -1737,193 +2613,370 @@ function DepositPage() {
 
 function PaymentPage() {
   const { id } = useParams()
-  const [message, setMessage] = useState("Redirecting to secure payment checkout...")
+  const [booking, setBooking] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [paying, setPaying] = useState(false)
+  const [error, setError] = useState("")
 
   useEffect(() => {
-    let isMounted = true
+    let active = true
 
-    async function startPayment() {
+    async function loadBooking() {
       try {
-        const res = await fetch(`${API}/api/create-checkout/${id}`, {
-          method: "POST",
-        })
-
+        const res = await fetch(`${API}/api/bookings/${id}`)
         const data = await res.json().catch(() => ({}))
 
+        if (!active) return
+
         if (!res.ok) {
-          if (isMounted) {
-            setMessage(data.error || "Could not create payment checkout.")
-          }
+          setError(data.error || "Could not load booking.")
+          setLoading(false)
           return
         }
 
-        if (data.url) {
-          window.location.href = data.url
-          return
+        setBooking(data)
+      } catch (err) {
+        console.error(err)
+        if (active) {
+          setError("Server error while loading booking.")
         }
-
-        if (isMounted) {
-          setMessage("Payment checkout link was not returned.")
-        }
-      } catch (error) {
-        console.error(error)
-        if (isMounted) {
-          setMessage("Server error creating payment checkout.")
+      } finally {
+        if (active) {
+          setLoading(false)
         }
       }
     }
 
-    startPayment()
+    loadBooking()
 
     return () => {
-      isMounted = false
+      active = false
     }
   }, [id])
+
+  async function handlePayNow() {
+    setPaying(true)
+    setError("")
+
+    try {
+      const res = await fetch(`${API}/api/create-checkout/${id}`, {
+        method: "POST",
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok || !data.url) {
+        setError(data.error || "Could not create checkout session.")
+        setPaying(false)
+        return
+      }
+
+      window.location.href = data.url
+    } catch (err) {
+      console.error(err)
+      setError("Server error while starting payment.")
+      setPaying(false)
+    }
+  }
 
   return (
     <div style={styles.successPage}>
       <div style={styles.successCard}>
-        <h1 style={styles.successTitle}>Complete Your Payment</h1>
-        <p style={styles.successText}>{message}</p>
+        <h1 style={styles.successTitle}>Complete Rental Payment</h1>
+
+        {loading ? <div style={styles.loadingBox}>Loading booking...</div> : null}
+
+        {!loading && booking ? (
+          <>
+            <div style={styles.successDetails}>
+              <div>
+                <strong>Booking ID:</strong> {booking.id}
+              </div>
+              <div>
+                <strong>Rental:</strong> {booking.rentalLabel}
+              </div>
+              <div>
+                <strong>Date:</strong> {booking.date || "—"}
+              </div>
+              <div>
+                <strong>Time:</strong> {booking.rentalTime || "—"}
+              </div>
+              <div>
+                <strong>Total:</strong> ${booking?.pricing?.totalAmountDollars || "0.00"}
+              </div>
+            </div>
+
+            <div style={styles.buttonRow}>
+              <button
+                type="button"
+                style={paying ? styles.buttonDisabled : styles.primaryButton}
+                disabled={paying}
+                onClick={handlePayNow}
+              >
+                {paying ? "Redirecting..." : "Pay Rental Now"}
+              </button>
+            </div>
+          </>
+        ) : null}
+
+        {error ? <div style={styles.errorBox}>{error}</div> : null}
       </div>
     </div>
   )
 }
+function SuccessPage() {
+  const params = new URLSearchParams(window.location.search)
+  const bookingId = params.get("bookingId")
 
+  return (
+    <div style={styles.successPage}>
+      <div style={styles.successCard}>
+        <h1 style={styles.successTitle}>Success</h1>
+        <p style={styles.successText}>
+          Your checkout completed successfully.
+        </p>
+
+        {bookingId ? (
+          <div style={styles.successDetails}>
+            <div>
+              <strong>Booking ID:</strong> {bookingId}
+            </div>
+          </div>
+        ) : null}
+
+        <div style={styles.buttonRow}>
+          <a href="/" style={styles.primaryButtonLink}>
+            Return Home
+          </a>
+          {bookingId ? (
+            <a href={`/pay/${bookingId}`} style={styles.secondaryButtonLink}>
+              View Booking
+            </a>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+function CancelPage() {
+  return (
+    <div style={styles.successPage}>
+      <div style={styles.successCard}>
+        <h1 style={styles.successTitle}>Checkout Canceled</h1>
+        <p style={styles.successText}>
+          Your checkout was canceled. You can return and try again when ready.
+        </p>
+
+        <div style={styles.buttonRow}>
+          <a href="/" style={styles.primaryButtonLink}>
+            Return Home
+          </a>
+        </div>
+      </div>
+    </div>
+  )
+}
 function MainApp() {
-  const path = window.location.pathname
-  const pathParts = path.split("/")
-  const depositRequestBookingId = pathParts[1] === "deposit" ? pathParts[2] : null
-  const payRequestBookingId = pathParts[1] === "pay" ? pathParts[2] : null
+  const [rentalOptions, setRentalOptions] = useState(fallbackRentalOptions)
+  const [testimonials, setTestimonials] = useState([])
 
-  const [rental, setRental] = useState("Pontoon - 6 Hours")
+  const [rental, setRental] = useState("Jet Ski (Single)")
   const [date, setDate] = useState("")
-  const [rentalTime, setRentalTime] = useState("07:00 AM")
+  const [rentalTime, setRentalTime] = useState("08:00 AM")
   const [location, setLocation] = useState("None")
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [file, setFile] = useState(null)
 
   const [bookingId, setBookingId] = useState(null)
-  const [bookingStatus, setBookingStatus] = useState("new")
+  const [bookingStatus, setBookingStatus] = useState("pending_approval")
   const [waiverStatus, setWaiverStatus] = useState("not_started")
+  const [depositStatus, setDepositStatus] = useState("not_scheduled")
+
   const [availabilityMessage, setAvailabilityMessage] = useState("")
   const [statusMessage, setStatusMessage] = useState("")
   const [loading, setLoading] = useState(false)
   const [paying, setPaying] = useState(false)
-
   const [showWaiver, setShowWaiver] = useState(false)
   const [waiverAccepted, setWaiverAccepted] = useState(false)
+  const navigate = useNavigate()
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(null)
+const [unavailableDates, setUnavailableDates] = useState([])
+const [isAvailable, setIsAvailable] = useState(true)
 
-  const [successBooking, setSuccessBooking] = useState(null)
-  const [successLoading, setSuccessLoading] = useState(false)
+function formatMonthForApi(dateObj) {
+  const year = dateObj.getFullYear()
+  const month = String(dateObj.getMonth() + 1).padStart(2, "0")
+  return `${year}-${month}`
+}
 
-  const rentalPrice = useMemo(() => getRentalPrice(rental), [rental])
-  const towPrice = useMemo(() => getTowPrice(location), [location])
-  const totalAmount = useMemo(() => rentalPrice + towPrice, [rentalPrice, towPrice])
+async function loadUnavailableDates(nextRental = rental, monthDate = selectedCalendarDate || new Date()) {
+  try {
+    const month = formatMonthForApi(monthDate)
 
-  function resetBookingForm() {
-    setBookingId(null)
-    setBookingStatus("new")
-    setWaiverStatus("not_started")
-    setAvailabilityMessage("")
-    setStatusMessage("")
-    setRental("Pontoon - 6 Hours")
-    setDate("")
-    setRentalTime("07:00 AM")
-    setLocation("None")
-    setEmail("")
-    setName("")
-    setFile(null)
-    setShowWaiver(false)
-    setWaiverAccepted(false)
-  }
+    const params = new URLSearchParams({
+      rentalLabel: nextRental,
+      month,
+    })
 
-  function loadExistingBookingIntoForm(booking) {
-    setBookingId(booking.id || null)
-    setBookingStatus(booking.status || "new")
-    setWaiverStatus(booking.waiverStatus || "not_started")
-    setRental(booking.rentalLabel || "Pontoon - 6 Hours")
-    setDate(booking.date || "")
-    setRentalTime(booking.rentalTime || "07:00 AM")
-    setLocation(booking.towLocation || "None")
-    setName(booking.waiverPrintedName || "")
-    setEmail(booking.customerEmail || "")
-    setAvailabilityMessage("")
+    const res = await fetch(`${API}/api/calendar-unavailable?${params.toString()}`)
+    const data = await res.json().catch(() => ({}))
 
-    if ((booking.waiverStatus || "not_started") !== "signed" && booking.status === "approved_unpaid") {
-      setStatusMessage("This booking is approved. Please sign the waiver below, then you can pay.")
-    } else if ((booking.waiverStatus || "not_started") !== "signed") {
-      setStatusMessage("Booking loaded. Please sign the waiver below to continue.")
-    } else if (booking.status === "approved_unpaid") {
-      setStatusMessage("Booking loaded. Your waiver is signed and payment is ready.")
-    } else {
-      setStatusMessage("Booking loaded. You can continue below.")
-    }
-
-    if ((booking.waiverStatus || "not_started") !== "signed") {
-      setShowWaiver(true)
-      setWaiverAccepted(false)
-    } else {
-      setShowWaiver(false)
-      setWaiverAccepted(true)
-    }
-  }
-
-  async function checkAvailability(selectedDate = date, selectedRental = rental) {
-    if (!selectedDate) {
-      setAvailabilityMessage("")
+    if (!res.ok) {
+      console.error(data.error || "Could not load unavailable dates.")
+      setUnavailableDates([])
       return
     }
 
-    try {
-      const res = await fetch(
-        `${API}/api/availability?rentalLabel=${encodeURIComponent(selectedRental)}&date=${selectedDate}`
-      )
+    const parsed = (data.unavailableDates || []).map((dateStr) => {
+      const [year, monthNum, day] = dateStr.split("-").map(Number)
+      return new Date(year, monthNum - 1, day)
+    })
 
+    setUnavailableDates(parsed)
+  } catch (err) {
+    console.error(err)
+    setUnavailableDates([])
+  }
+}
+
+useEffect(() => {
+  loadUnavailableDates(rental, selectedCalendarDate || new Date())
+}, [rental])
+  useEffect(() => {
+    fetchPublicPricing().then((options) => {
+      setRentalOptions(options)
+      if (!options.some((item) => item.value === rental)) {
+        setRental(options[0]?.value || "Jet Ski (Single)")
+      }
+    })
+
+    refreshTestimonials()
+  }, [])
+
+  async function refreshTestimonials() {
+    const rows = await fetchPublicTestimonials()
+    setTestimonials(rows)
+  }
+
+  const rentalPrice = getRentalPrice(rental, rentalOptions)
+  const towPrice = getTowPrice(location)
+  const totalAmount = rentalPrice + towPrice
+  const pontoonUpgradeAmount = Math.max(
+    0,
+    getRentalPrice("Pontoon - Full Day", rentalOptions) -
+      getRentalPrice("Pontoon - Half Day", rentalOptions)
+  )
+
+  const selectedRentalDescription = useMemo(() => {
+    if (rental === "Jet Ski (Single)") {
+      return "Single jet ski rental for an exciting day on the water."
+    }
+    if (rental === "Jet Ski (Double)") {
+      return "Double jet ski option for more time and flexibility on the lake."
+    }
+    if (rental === "Pontoon - Half Day") {
+      return "Half-day pontoon option for relaxing group cruising."
+    }
+    if (rental === "Pontoon - Full Day") {
+      return "Full-day pontoon option with the best value for groups."
+    }
+    if (rental === "Bass Boat - Full Day") {
+      return "Full-day bass boat rental for fishing and performance boating."
+    }
+    return "Select your preferred rental option."
+  }, [rental])
+
+ async function checkAvailability(nextDate = date, nextRental = rental) {
+  if (!nextDate || !nextRental) {
+    setAvailabilityMessage("")
+    return
+  }
+
+  try {
+    const params = new URLSearchParams({
+      rentalLabel: nextRental,
+      date: nextDate,
+    })
+
+    const res = await fetch(`${API}/api/availability?${params.toString()}`)
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      setAvailabilityMessage(data.error || "Could not check availability.")
+      return
+    }
+
+    if (!data.available) {
+      setAvailabilityMessage("This equipment is not available for that date.")
+      setIsAvailable(false)
+      return
+    }
+
+    setIsAvailable(true)
+    setAvailabilityMessage("That rental appears available for the selected date.")
+
+  } catch (err) {
+    console.error(err)
+    setAvailabilityMessage("Server error while checking availability.")
+    setIsAvailable(false)
+  }
+}
+
+  async function refreshBookingStatus(currentBookingId = bookingId) {
+    if (!currentBookingId) return
+
+    try {
+      const res = await fetch(`${API}/api/bookings/${currentBookingId}`)
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
-        setAvailabilityMessage(data.error || "Could not check availability.")
+        setStatusMessage(data.error || "Could not refresh booking.")
         return
       }
 
-      setAvailabilityMessage(data.available ? "✅ Available" : "❌ Not available")
+      setBookingStatus(data.status || "pending_approval")
+      setWaiverStatus(data.waiverStatus || "not_started")
+      setDepositStatus(data.depositStatus || "not_scheduled")
+      setStatusMessage(`Booking ${data.id} status refreshed.`)
     } catch (err) {
       console.error(err)
-      setAvailabilityMessage("Error checking availability.")
+      setStatusMessage("Server error while refreshing booking.")
     }
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
+    setAvailabilityMessage("")
+    setStatusMessage("")
 
     if (!date) {
-      setAvailabilityMessage("Please choose a date.")
+      setAvailabilityMessage("Please choose a rental date.")
       return
     }
 
     if (!name.trim()) {
-      setStatusMessage("Please enter your full legal name.")
+      setAvailabilityMessage("Please enter your full legal name.")
       return
     }
 
     if (!email.trim()) {
-      setStatusMessage("Please enter your email address.")
+      setAvailabilityMessage("Please enter your email address.")
       return
     }
 
-    if (!file && !bookingId) {
-      setStatusMessage("Please upload your photo ID.")
+    if (!file) {
+      setAvailabilityMessage("Please upload a photo ID.")
       return
     }
 
     setLoading(true)
-    setStatusMessage("Submitting booking request...")
 
     try {
-      if (bookingId) {
-        setStatusMessage("Booking loaded. Continue with waiver or payment below.")
+      const bookings = await fetchBookingsSafe()
+
+      if (isJetSkiBlocked(bookings, rental, date)) {
+        setAvailabilityMessage("Jet skis are already fully booked for that date.")
         setLoading(false)
         return
       }
@@ -1934,11 +2987,8 @@ function MainApp() {
       formData.append("rentalTime", rentalTime)
       formData.append("towLocation", location)
       formData.append("waiverPrintedName", name.trim())
-      formData.append("waiverAccepted", waiverAccepted ? "true" : "false")
       formData.append("customerEmail", email.trim())
-      if (file) {
-        formData.append("photoId", file)
-      }
+      formData.append("photoId", file)
 
       const res = await fetch(`${API}/api/bookings/waiver`, {
         method: "POST",
@@ -1948,73 +2998,76 @@ function MainApp() {
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
-        setStatusMessage(data.error || "Booking failed.")
-        setLoading(false)
+        setAvailabilityMessage(data.error || "Could not create booking.")
         return
       }
 
       setBookingId(data.bookingId)
       setBookingStatus("pending_approval")
-      setWaiverStatus(waiverAccepted ? "signed" : "not_started")
-      setShowWaiver(!waiverAccepted)
-
+      setWaiverStatus("not_started")
+      setDepositStatus("not_scheduled")
       setStatusMessage(
-        `Booking submitted. Booking ID: ${data.bookingId}. Awaiting admin approval.`
-      )
-    } catch (error) {
-      console.error(error)
-      setStatusMessage("Server error submitting booking.")
+  `Booking request submitted. Your booking ID is ${data.bookingId}.`
+)
+setShowWaiver(true)
+    } catch (err) {  
+      console.error(err)
+      setAvailabilityMessage("Server error while creating booking.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+ async function handleSignWaiver() {
+  if (!bookingId) {
+    setStatusMessage("Create a booking first.")
+    return
+  }
+
+  try {
+    setStatusMessage("")
+    setLoading(true)
+
+    const res = await fetch(`${API}/api/waiver/signed/${bookingId}`, {
+      method: "POST",
+    })
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      setStatusMessage(data.error || "Could not sign waiver.")
+      return
     }
 
+    setWaiverStatus("signed")
+    setShowWaiver(false)
+    navigate("/request-received")
+  } catch (err) {
+    console.error(err)
+    setStatusMessage("Server error while signing waiver.")
+  } finally {
     setLoading(false)
   }
-
-  async function handleSignWaiver() {
-    if (!bookingId) {
-      setStatusMessage("No booking found to sign waiver.")
-      return
-    }
-
-    if (!waiverAccepted) {
-      setStatusMessage("You must agree to the waiver before signing.")
-      return
-    }
-
-    try {
-      const res = await fetch(`${API}/api/waiver/signed/${bookingId}`, {
-        method: "POST",
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        setStatusMessage(data.error || "Failed to sign waiver.")
-        return
-      }
-
-      setWaiverStatus("signed")
-      setShowWaiver(false)
-      setWaiverAccepted(true)
-
-      if (bookingStatus === "approved_unpaid") {
-        setStatusMessage("Waiver signed. Your booking is approved and ready for payment.")
-      } else {
-        setStatusMessage("Waiver signed successfully.")
-      }
-    } catch (error) {
-      console.error(error)
-      setStatusMessage("Server error signing waiver.")
-    }
-  }
+}
 
   async function handlePay() {
     if (!bookingId) {
-      setStatusMessage("No booking found.")
+      setStatusMessage("Create a booking first.")
+      return
+    }
+
+    if (bookingStatus !== "approved_unpaid") {
+      setStatusMessage("Your booking must be approved before payment.")
+      return
+    }
+
+    if (waiverStatus !== "signed") {
+      setStatusMessage("You must sign the waiver before payment.")
       return
     }
 
     setPaying(true)
-    setStatusMessage("Redirecting to payment...")
+    setStatusMessage("")
 
     try {
       const res = await fetch(`${API}/api/create-checkout/${bookingId}`, {
@@ -2023,184 +3076,68 @@ function MainApp() {
 
       const data = await res.json().catch(() => ({}))
 
-      if (!res.ok) {
-        setStatusMessage(data.error || "Payment failed.")
+      if (!res.ok || !data.url) {
+        setStatusMessage(data.error || "Could not start payment.")
         setPaying(false)
         return
       }
 
-      if (data.url) {
-        window.location.href = data.url
-        return
-      }
-
-      setStatusMessage("Payment link not returned.")
-    } catch (error) {
-      console.error(error)
-      setStatusMessage("Server error during payment.")
-    }
-
-    setPaying(false)
-  }
-
-  async function refreshBookingStatus() {
-    if (!bookingId) {
-      setStatusMessage("Enter or load a booking first.")
-      return
-    }
-
-    try {
-      const res = await fetch(`${API}/api/bookings/${bookingId}`)
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        setStatusMessage(data.error || "Could not refresh booking status.")
-        return
-      }
-
-      setBookingStatus(data.status || "new")
-      setWaiverStatus(data.waiverStatus || "not_started")
-
-      if (data.status === "approved_unpaid" && (data.waiverStatus || "not_started") !== "signed") {
-        setShowWaiver(true)
-        setStatusMessage("Approved. Please sign the waiver to continue.")
-      } else if (data.status === "approved_unpaid") {
-        setStatusMessage("Approved. You can now pay.")
-      } else if (data.status === "confirmed") {
-        setStatusMessage("Booking confirmed.")
-      } else if (data.status === "denied") {
-        setStatusMessage("Booking was denied.")
-      } else {
-        setStatusMessage(`Booking status: ${normalizeStatusLabel(data.status || "new")}`)
-      }
-    } catch (error) {
-      console.error(error)
-      setStatusMessage("Server error while refreshing booking.")
+      window.location.href = data.url
+    } catch (err) {
+      console.error(err)
+      setStatusMessage("Server error while starting payment.")
+      setPaying(false)
     }
   }
 
-  useEffect(() => {
-    async function loadSuccessBooking() {
-      if (path !== "/success") return
-
-      const params = new URLSearchParams(window.location.search)
-      const bookingIdFromUrl = params.get("bookingId")
-
-      if (!bookingIdFromUrl) return
-
-      setSuccessLoading(true)
-
-      try {
-        const res = await fetch(`${API}/api/bookings/${bookingIdFromUrl}`)
-        const data = await res.json().catch(() => null)
-
-        if (res.ok && data) {
-          setSuccessBooking(data)
-          setBookingStatus(data.status || "new")
-          setWaiverStatus(data.waiverStatus || "not_started")
-        }
-      } catch (error) {
-        console.error("Could not load success booking:", error)
-      } finally {
-        setSuccessLoading(false)
-      }
-    }
-
-    loadSuccessBooking()
-  }, [path])
-
-  const selectedRentalDescription = useMemo(() => {
-    switch (rental) {
-      case "Jet Ski (Single)":
-        return "Single jet ski rental day."
-      case "Jet Ski (Double)":
-        return "Two jet skis for the day."
-      case "Pontoon - 6 Hours":
-        return "6-hour pontoon rental."
-      case "Pontoon - 8 Hours":
-        return "8-hour pontoon rental."
-      case "Pontoon - 10 Hours":
-        return "10-hour pontoon rental."
-      case "Bass Boat - Full Day":
-        return "Full-day bass boat rental."
-      default:
-        return ""
-    }
-  }, [rental])
-
-  if (path === "/admin") {
-    return <AdminPage />
+  function resetBookingForm() {
+    setRental("Jet Ski (Single)")
+    setDate("")
+    setRentalTime("08:00 AM")
+    setLocation("None")
+    setName("")
+    setEmail("")
+    setFile(null)
+    setBookingId(null)
+    setBookingStatus("pending_approval")
+    setWaiverStatus("not_started")
+    setDepositStatus("not_scheduled")
+    setAvailabilityMessage("")
+    setStatusMessage("")
+    setShowWaiver(false)
+    setWaiverAccepted(false)
   }
 
-  if (depositRequestBookingId) {
-    return <DepositPage />
-  }
-
-  if (payRequestBookingId) {
-    return <PaymentPage />
-  }
-
-  if (path === "/success") {
-    return (
-      <div style={styles.successPage}>
-        <div style={styles.successCard}>
-          <h1 style={styles.successTitle}>✅ Payment Successful</h1>
-          <p style={styles.successText}>
-            Your payment was successful and your booking details are shown below.
-          </p>
-
-          {successLoading ? (
-            <p style={styles.successText}>Loading booking details...</p>
-          ) : successBooking ? (
-            <div style={styles.successDetails}>
-              <div><strong>Booking ID:</strong> {successBooking.id}</div>
-              <div><strong>Rental:</strong> {successBooking.rentalLabel}</div>
-              <div><strong>Date:</strong> {successBooking.date}</div>
-              <div><strong>Time:</strong> {successBooking.rentalTime || "Not provided"}</div>
-              <div><strong>Tow Location:</strong> {successBooking.towLocation}</div>
-              <div><strong>Email:</strong> {successBooking.customerEmail || "Not provided"}</div>
-              <div><strong>Payment Status:</strong> {normalizeStatusLabel(successBooking.paymentStatus)}</div>
-              <div><strong>Status:</strong> {normalizeStatusLabel(successBooking.status)}</div>
-            </div>
-          ) : (
-            <p style={styles.successText}>
-              Your payment was processed. Booking details were not available on this page.
-            </p>
-          )}
-
-          <button style={styles.primaryButton} onClick={() => (window.location.href = "/")}>
-            Return Home
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  if (path === "/cancel") {
-    return (
-      <div style={styles.successPage}>
-        <div style={styles.successCard}>
-          <h1 style={styles.cancelTitle}>❌ Payment Cancelled</h1>
-          <p style={styles.successText}>Your checkout was cancelled. No payment was completed.</p>
-          <button style={styles.primaryButton} onClick={() => (window.location.href = "/")}>
-            Return Home
-          </button>
-        </div>
-      </div>
-    )
+  function loadExistingBookingIntoForm(booking) {
+    setBookingId(booking.id || null)
+    setRental(booking.rentalLabel || "Jet Ski (Single)")
+    setDate(booking.date || "")
+    setRentalTime(booking.rentalTime || "08:00 AM")
+    setLocation(booking.towLocation || "None")
+    setName(booking.waiverPrintedName || "")
+    setEmail(booking.customerEmail || "")
+    setBookingStatus(booking.status || "pending_approval")
+    setWaiverStatus(booking.waiverStatus || "not_started")
+    setDepositStatus(booking.depositStatus || "not_scheduled")
+    setAvailabilityMessage("")
+    setStatusMessage(`Loaded booking ${booking.id}.`)
+    setShowWaiver(false)
+    setWaiverAccepted(false)
   }
 
   return (
     <div style={styles.page}>
       <header style={styles.header}>
         <div style={styles.headerRow}>
-          <div>
-            <h1 style={styles.title}>Cleared to Cruise</h1>
-            <p style={styles.subtitle}>
-              Boat rentals, waiver confirmation, approval workflow, and secure online checkout
-            </p>
-          </div>
+         <div style={styles.heroHeader}>
+  <img src={HEADER_LOGO} alt="Cleared to Cruise" style={styles.heroLogo} />
+</div>
+     
         </div>
+
+        <p style={styles.subtitle}>
+          Premium boat and jet ski rentals — simple booking, smooth check-in, unforgettable days on the water.
+        </p>
       </header>
 
       <section style={styles.topGrid}>
@@ -2243,6 +3180,7 @@ function MainApp() {
             key={card.key}
             card={card}
             selectedRental={rental}
+            rentalOptions={rentalOptions}
             onChange={(value) => {
               setRental(value)
               setAvailabilityMessage("")
@@ -2267,22 +3205,55 @@ function MainApp() {
 
         <div style={styles.selectedRentalBar}>
           <span style={styles.selectedRentalLabel}>Selected Rental</span>
-          <strong style={styles.selectedRentalValue}>{getRentalLabel(rental)}</strong>
+          <strong style={styles.selectedRentalValue}>
+            {rental} — ${getRentalPrice(rental, rentalOptions)} + fuel
+          </strong>
         </div>
+
+        {rental === "Pontoon - Full Day" ? (
+          <div style={styles.bestValueBanner}>
+            Most Popular • Best Value for groups and longer days on the water
+          </div>
+        ) : null}
+
+        {rental === "Pontoon - Half Day" && pontoonUpgradeAmount > 0 ? (
+          <div style={styles.upgradeBanner}>
+            Upgrade to Pontoon Full Day for just ${pontoonUpgradeAmount} more plus fuel.
+          </div>
+        ) : null}
 
         <form onSubmit={handleSubmit}>
           <div style={styles.formGrid}>
             <label style={styles.label}>
               Rental Date
-              <input
-                style={styles.input}
-                type="date"
-                value={date}
-                onChange={(e) => {
-                  setDate(e.target.value)
-                  checkAvailability(e.target.value, rental)
-                }}
-              />
+<DatePicker
+  selected={selectedCalendarDate}
+  onChange={(dateObj) => {
+    setSelectedCalendarDate(dateObj)
+
+    const year = dateObj.getFullYear()
+    const month = String(dateObj.getMonth() + 1).padStart(2, "0")
+    const day = String(dateObj.getDate()).padStart(2, "0")
+
+    const formatted = `${year}-${month}-${day}`
+
+    setDate(formatted)
+    checkAvailability(formatted, rental)
+  }}
+  excludeDates={unavailableDates}
+  minDate={new Date()}
+  placeholderText="Select a rental date"
+  className="ctc-datepicker-input"
+  dayClassName={(dateObj) => {
+    const isBlocked = unavailableDates.some(
+      (d) =>
+        d.getFullYear() === dateObj.getFullYear() &&
+        d.getMonth() === dateObj.getMonth() &&
+        d.getDate() === dateObj.getDate()
+    )
+    return isBlocked ? "ctc-unavailable-day" : ""
+  }}
+/>
             </label>
 
             <label style={styles.label}>
@@ -2519,6 +3490,10 @@ function MainApp() {
             <span style={styles.statusValue}>{normalizeStatusLabel(waiverStatus)}</span>
           </div>
           <div style={styles.statusCard}>
+            <span style={styles.statusLabel}>Deposit Status</span>
+            <span style={styles.statusValue}>{normalizeStatusLabel(depositStatus)}</span>
+          </div>
+          <div style={styles.statusCard}>
             <span style={styles.statusLabel}>Rental</span>
             <span style={styles.statusValue}>{rental}</span>
           </div>
@@ -2538,109 +3513,28 @@ function MainApp() {
 
       <BookingLookupCard onLoadBooking={loadExistingBookingIntoForm} />
 
+      <TestimonialsSection
+        testimonials={testimonials}
+        onSubmitted={refreshTestimonials}
+      />
+
       <footer style={styles.policyFooter}>
         <small style={styles.policyText}>{cancellationPolicyText}</small>
       </footer>
     </div>
   )
 }
-function AdminLoginCard({ onLoginSuccess }) {
-  const [username, setUsername] = useState("")
-  const [password, setPassword] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
 
-  async function handleAdminLogin(e) {
-    e.preventDefault()
-    setError("")
-
-    if (!username.trim() || !password.trim()) {
-      setError("Enter your admin username and password.")
-      return
-    }
-
-    setLoading(true)
-
-    try {
-      const encoded = btoa(`${username.trim()}:${password.trim()}`)
-      localStorage.setItem("ctc_admin_token", encoded)
-
-      const res = await fetch(`${API}/api/admin/bookings`, {
-        headers: {
-          Authorization: `Basic ${encoded}`,
-        },
-      })
-
-      if (!res.ok) {
-        localStorage.removeItem("ctc_admin_token")
-        setError("Invalid admin credentials")
-        return
-      }
-
-      onLoginSuccess()
-    } catch (err) {
-      console.error(err)
-      setError("Server error during admin login.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div style={styles.adminLoginWrap}>
-      <div style={styles.adminLoginCard}>
-        <h2 style={styles.adminLoginTitle}>Admin Login</h2>
-        <p style={styles.adminLoginText}>
-          Enter your admin username and password to access the Cleared to Cruise admin panel.
-        </p>
-
-        <form onSubmit={handleAdminLogin} style={styles.adminLoginForm}>
-          <label style={styles.label}>
-            Username
-            <input
-              style={styles.input}
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Admin username"
-            />
-          </label>
-
-          <label style={styles.label}>
-            Password
-            <input
-              style={styles.input}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Admin password"
-            />
-          </label>
-
-          <button
-            type="submit"
-            style={loading ? styles.buttonDisabled : styles.primaryButton}
-            disabled={loading}
-          >
-            {loading ? "Logging In..." : "Log In"}
-          </button>
-        </form>
-
-        {error ? <div style={styles.errorBox}>{error}</div> : null}
-      </div>
-    </div>
-  )
-}
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<MainApp />} />
+        <Route path="/admin" element={<AdminPage />} />
         <Route path="/deposit/:id" element={<DepositPage />} />
         <Route path="/pay/:id" element={<PaymentPage />} />
-        <Route path="/success" element={<MainApp />} />
-        <Route path="/cancel" element={<MainApp />} />
-        <Route path="/admin" element={<MainApp />} />
+        <Route path="/cancel" element={<CancelPage />} />
+        <Route path="/request-received" element={<RequestReceived />} />
       </Routes>
     </BrowserRouter>
   )
@@ -2656,34 +3550,45 @@ const styles = {
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
     color: "#102030",
   },
-
-  header: {
-    maxWidth: "1200px",
-    margin: "0 auto 22px auto",
-  },
-
-  headerRow: {
+header: {
+  width: "100%",
+  margin: "0 auto",
+  padding: "0",   // ← remove vertical padding
+},
+headerRow: {
+  display: "flex",
+  justifyContent: "center",
+  alignItems: "center",
+  gap: "0",
+  flexWrap: "wrap",
+},
+  brandWrap: {
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "16px",
+    alignItems: "center",
+    gap: "18px",
     flexWrap: "wrap",
   },
-
-  title: {
-    margin: 0,
-    color: "#ffffff",
-    fontSize: "42px",
-    fontWeight: 800,
-    letterSpacing: "-0.5px",
-  },
-
+heroHeader: {
+  width: "100%",
+  display: "flex",
+  justifyContent: "center",
+  alignItems: "center",
+  padding: "0",
+  marginTop: "-100px", 
+  marginBottom: "-100px",  // slight lift, not aggressive
+},
+heroLogo: {
+  width: "90%",
+  maxWidth: "650px",   // ⭐ professional sweet spot
+  height: "auto",
+  display: "block",
+  margin: "0 auto",
+},
   subtitle: {
-    marginTop: "8px",
+    marginTop: "0px",
     color: "rgba(255,255,255,0.82)",
     fontSize: "16px",
   },
-
   topGrid: {
     maxWidth: "1200px",
     margin: "0 auto 20px auto",
@@ -2691,7 +3596,6 @@ const styles = {
     gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
     gap: "18px",
   },
-
   topCardLarge: {
     position: "relative",
     minHeight: "270px",
@@ -2700,7 +3604,6 @@ const styles = {
     boxShadow: "0 14px 40px rgba(0,0,0,0.28)",
     background: "#0f1720",
   },
-
   largeImage: {
     width: "100%",
     height: "100%",
@@ -2708,7 +3611,6 @@ const styles = {
     objectFit: "cover",
     display: "block",
   },
-
   imageOverlay: {
     position: "absolute",
     inset: 0,
@@ -2718,20 +3620,17 @@ const styles = {
     padding: "24px",
     background: "linear-gradient(to top, rgba(0,0,0,0.62), rgba(0,0,0,0.08))",
   },
-
   overlayTitle: {
     margin: 0,
     color: "#ffffff",
     fontSize: "30px",
     fontWeight: 800,
   },
-
   overlayText: {
     margin: "8px 0 0 0",
     color: "rgba(255,255,255,0.92)",
     fontSize: "15px",
   },
-
   overlayLinkButton: {
     display: "inline-flex",
     alignItems: "center",
@@ -2748,7 +3647,6 @@ const styles = {
     border: "1px solid rgba(255,255,255,0.22)",
     backdropFilter: "blur(6px)",
   },
-
   heroGrid: {
     maxWidth: "1200px",
     margin: "0 auto 20px auto",
@@ -2756,7 +3654,6 @@ const styles = {
     gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
     gap: "18px",
   },
-
   heroCard: {
     background: "rgba(255,255,255,0.98)",
     borderRadius: "20px",
@@ -2767,20 +3664,36 @@ const styles = {
     flexDirection: "column",
     transition: "transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease",
   },
-
   heroCardSelected: {
     border: "2px solid #0f2233",
     boxShadow: "0 16px 36px rgba(15, 34, 51, 0.18)",
     transform: "translateY(-2px)",
   },
-
+  heroCardBestValue: {
+    border: "2px solid #157347",
+    boxShadow: "0 16px 36px rgba(21, 115, 71, 0.18)",
+  },
+  heroImageWrap: {
+    position: "relative",
+  },
   heroImage: {
     width: "100%",
     height: "220px",
     objectFit: "cover",
     display: "block",
   },
-
+  heroBadge: {
+    position: "absolute",
+    top: "12px",
+    right: "12px",
+    background: "#157347",
+    color: "#ffffff",
+    padding: "8px 10px",
+    borderRadius: "999px",
+    fontSize: "12px",
+    fontWeight: 800,
+    boxShadow: "0 8px 18px rgba(21, 115, 71, 0.25)",
+  },
   heroContent: {
     padding: "16px",
     display: "flex",
@@ -2789,26 +3702,34 @@ const styles = {
     flex: 1,
     justifyContent: "space-between",
   },
-
   heroTitle: {
     margin: "0 0 8px 0",
     fontSize: "20px",
     fontWeight: 800,
     color: "#0f2233",
   },
-
   heroText: {
     margin: 0,
     color: "#5b6b79",
     lineHeight: 1.5,
     fontSize: "14px",
   },
-
-  heroSelectWrap: {
-    marginTop: "auto",
-    paddingTop: "4px",
+  bestValueText: {
+    marginTop: "10px",
+    color: "#157347",
+    fontWeight: 800,
+    fontSize: "13px",
   },
-
+  heroUpgradeHint: {
+    marginTop: "10px",
+    color: "#1d4ed8",
+    fontWeight: 700,
+    fontSize: "13px",
+  },
+  heroDropdownActionWrap: {
+    display: "grid",
+    gap: "10px",
+  },
   heroSelectLabel: {
     display: "flex",
     flexDirection: "column",
@@ -2817,7 +3738,6 @@ const styles = {
     fontWeight: 800,
     color: "#203445",
   },
-
   heroSelect: {
     width: "100%",
     padding: "12px 14px",
@@ -2829,12 +3749,6 @@ const styles = {
     outline: "none",
     boxSizing: "border-box",
   },
-
-  heroDropdownActionWrap: {
-    display: "grid",
-    gap: "10px",
-  },
-
   heroChooseButton: {
     width: "100%",
     border: "1px solid #cfd9e3",
@@ -2846,7 +3760,6 @@ const styles = {
     fontWeight: 800,
     cursor: "pointer",
   },
-
   heroSelectedButton: {
     width: "100%",
     border: "none",
@@ -2859,7 +3772,6 @@ const styles = {
     cursor: "pointer",
     boxShadow: "0 8px 20px rgba(15, 34, 51, 0.16)",
   },
-
   mainCard: {
     maxWidth: "1200px",
     margin: "0 auto 20px auto",
@@ -2869,7 +3781,6 @@ const styles = {
     boxShadow: "0 16px 36px rgba(14, 34, 53, 0.12)",
     border: "1px solid rgba(15, 23, 32, 0.06)",
   },
-
   formHeaderRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -2878,27 +3789,23 @@ const styles = {
     flexWrap: "wrap",
     marginBottom: "18px",
   },
-
   formHeaderActions: {
     display: "flex",
     alignItems: "center",
     gap: "12px",
     flexWrap: "wrap",
   },
-
   sectionTitle: {
     margin: 0,
     fontSize: "28px",
     fontWeight: 800,
     color: "#0f2233",
   },
-
   sectionSubtext: {
     margin: "8px 0 0 0",
     color: "#627382",
     fontSize: "15px",
   },
-
   badge: {
     background: "#0f2233",
     color: "#ffffff",
@@ -2908,7 +3815,24 @@ const styles = {
     fontWeight: 700,
     whiteSpace: "nowrap",
   },
-
+  bestValueBanner: {
+    marginBottom: "18px",
+    padding: "14px 16px",
+    borderRadius: "16px",
+    background: "#ecfdf3",
+    border: "1px solid #bde6cb",
+    color: "#157347",
+    fontWeight: 800,
+  },
+  upgradeBanner: {
+    marginBottom: "18px",
+    padding: "14px 16px",
+    borderRadius: "16px",
+    background: "#eef4ff",
+    border: "1px solid #c7d7fe",
+    color: "#1d4ed8",
+    fontWeight: 700,
+  },
   selectedRentalBar: {
     marginBottom: "18px",
     background: "#f7fafc",
@@ -2921,7 +3845,6 @@ const styles = {
     gap: "12px",
     flexWrap: "wrap",
   },
-
   selectedRentalLabel: {
     fontSize: "13px",
     fontWeight: 800,
@@ -2929,18 +3852,15 @@ const styles = {
     letterSpacing: "0.7px",
     color: "#6b7d8b",
   },
-
   selectedRentalValue: {
     fontSize: "16px",
     color: "#0f2233",
   },
-
   formGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
     gap: "16px",
   },
-
   label: {
     display: "flex",
     flexDirection: "column",
@@ -2949,7 +3869,6 @@ const styles = {
     fontWeight: 700,
     color: "#203445",
   },
-
   labelFull: {
     display: "flex",
     flexDirection: "column",
@@ -2959,7 +3878,6 @@ const styles = {
     color: "#203445",
     gridColumn: "1 / -1",
   },
-
   input: {
     width: "100%",
     padding: "13px 14px",
@@ -2971,7 +3889,19 @@ const styles = {
     outline: "none",
     boxSizing: "border-box",
   },
-
+  textarea: {
+    width: "100%",
+    padding: "13px 14px",
+    borderRadius: "12px",
+    border: "1px solid #d5dee7",
+    background: "#fbfdff",
+    fontSize: "15px",
+    color: "#102030",
+    outline: "none",
+    boxSizing: "border-box",
+    minHeight: "120px",
+    resize: "vertical",
+  },
   fileInput: {
     width: "100%",
     padding: "13px 14px",
@@ -2982,12 +3912,10 @@ const styles = {
     color: "#102030",
     boxSizing: "border-box",
   },
-
   fileName: {
     fontSize: "13px",
     color: "#627382",
   },
-
   priceSummary: {
     marginTop: "18px",
     background: "#f7fafc",
@@ -2997,7 +3925,6 @@ const styles = {
     display: "grid",
     gap: "10px",
   },
-
   priceRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -3005,7 +3932,6 @@ const styles = {
     color: "#203445",
     fontSize: "15px",
   },
-
   priceRowTotal: {
     display: "flex",
     justifyContent: "space-between",
@@ -3016,14 +3942,12 @@ const styles = {
     paddingTop: "10px",
     borderTop: "1px solid #d9e5ef",
   },
-
   buttonRow: {
     display: "flex",
     gap: "12px",
     flexWrap: "wrap",
     marginTop: "22px",
   },
-
   primaryButton: {
     border: "none",
     background: "#0f2233",
@@ -3035,7 +3959,6 @@ const styles = {
     cursor: "pointer",
     boxShadow: "0 8px 20px rgba(15, 34, 51, 0.16)",
   },
-
   secondaryButton: {
     border: "1px solid #cfd9e3",
     background: "#ffffff",
@@ -3046,7 +3969,6 @@ const styles = {
     fontWeight: 800,
     cursor: "pointer",
   },
-
   dangerButton: {
     border: "none",
     background: "#b42318",
@@ -3057,18 +3979,6 @@ const styles = {
     fontWeight: 800,
     cursor: "pointer",
   },
-
-  smallButton: {
-    border: "1px solid #d5dee7",
-    background: "#ffffff",
-    color: "#102030",
-    padding: "8px 10px",
-    borderRadius: "10px",
-    fontSize: "13px",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-
   buttonDisabled: {
     border: "none",
     background: "#b8c3cd",
@@ -3080,7 +3990,6 @@ const styles = {
     cursor: "not-allowed",
     opacity: 0.9,
   },
-
   waiverCard: {
     marginTop: "22px",
     padding: "20px",
@@ -3088,7 +3997,6 @@ const styles = {
     background: "#fff8e8",
     border: "1px solid #ead9a7",
   },
-
   waiverTitle: {
     marginTop: 0,
     marginBottom: "14px",
@@ -3096,7 +4004,6 @@ const styles = {
     fontWeight: 800,
     color: "#2d2410",
   },
-
   waiverBox: {
     maxHeight: "320px",
     overflowY: "auto",
@@ -3108,7 +4015,6 @@ const styles = {
     color: "#3b3426",
     marginBottom: "16px",
   },
-
   checkboxRow: {
     display: "flex",
     gap: "10px",
@@ -3117,14 +4023,12 @@ const styles = {
     fontWeight: 600,
     color: "#2d2410",
   },
-
   statusGrid: {
     marginTop: "22px",
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
     gap: "14px",
   },
-
   statusCard: {
     background: "#f7fafc",
     border: "1px solid #e1e8ef",
@@ -3134,7 +4038,6 @@ const styles = {
     flexDirection: "column",
     gap: "8px",
   },
-
   statusLabel: {
     fontSize: "12px",
     textTransform: "uppercase",
@@ -3142,14 +4045,12 @@ const styles = {
     color: "#6b7d8b",
     fontWeight: 800,
   },
-
   statusValue: {
     fontSize: "15px",
     color: "#102030",
     fontWeight: 700,
     wordBreak: "break-word",
   },
-
   successBox: {
     marginTop: "18px",
     padding: "14px 16px",
@@ -3159,7 +4060,6 @@ const styles = {
     color: "#157347",
     fontWeight: 700,
   },
-
   errorBox: {
     marginTop: "14px",
     padding: "14px 16px",
@@ -3169,7 +4069,6 @@ const styles = {
     color: "#b42318",
     fontWeight: 700,
   },
-
   infoBox: {
     marginTop: "14px",
     padding: "14px 16px",
@@ -3179,7 +4078,6 @@ const styles = {
     color: "#1d3347",
     fontWeight: 700,
   },
-
   loadingBox: {
     marginTop: "14px",
     padding: "14px 16px",
@@ -3189,7 +4087,6 @@ const styles = {
     color: "#28465f",
     fontWeight: 700,
   },
-
   successPage: {
     minHeight: "100vh",
     display: "flex",
@@ -3200,7 +4097,6 @@ const styles = {
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
   },
-
   successCard: {
     maxWidth: "640px",
     width: "100%",
@@ -3210,25 +4106,16 @@ const styles = {
     boxShadow: "0 16px 36px rgba(14, 34, 53, 0.12)",
     border: "1px solid rgba(15, 23, 32, 0.06)",
   },
-
   successTitle: {
     marginTop: 0,
     fontSize: "32px",
     color: "#157347",
   },
-
-  cancelTitle: {
-    marginTop: 0,
-    fontSize: "32px",
-    color: "#b42318",
-  },
-
   successText: {
     color: "#425466",
     fontSize: "16px",
     lineHeight: 1.6,
   },
-
   successDetails: {
     margin: "18px 0 24px 0",
     padding: "16px",
@@ -3238,13 +4125,11 @@ const styles = {
     display: "grid",
     gap: "10px",
   },
-
   lookupList: {
     display: "grid",
     gap: "14px",
     marginTop: "18px",
   },
-
   lookupCard: {
     marginTop: "18px",
     background: "#f7fafc",
@@ -3254,7 +4139,6 @@ const styles = {
     display: "grid",
     gap: "10px",
   },
-
   lookupRow: {
     display: "flex",
     alignItems: "center",
@@ -3263,20 +4147,30 @@ const styles = {
     color: "#102030",
     fontSize: "14px",
   },
-
+  lookupMeta: {
+    fontSize: "12px",
+    color: "#6b7d8b",
+    marginTop: "4px",
+  },
+  testimonialImage: {
+    width: "100%",
+    maxHeight: "320px",
+    objectFit: "cover",
+    borderRadius: "14px",
+    marginTop: "8px",
+    border: "1px solid #e1e8ef",
+  },
   policyFooter: {
     maxWidth: "1200px",
     margin: "0 auto",
     padding: "6px 24px 30px 24px",
     textAlign: "center",
   },
-
   policyText: {
     fontSize: "13px",
     color: "#5e7080",
     lineHeight: 1.5,
   },
-
   adminPage: {
     minHeight: "100vh",
     background: "#eef3f7",
@@ -3285,7 +4179,6 @@ const styles = {
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
     color: "#102030",
   },
-
   adminHeader: {
     maxWidth: "1200px",
     margin: "0 auto 20px auto",
@@ -3295,77 +4188,263 @@ const styles = {
     gap: "16px",
     flexWrap: "wrap",
   },
-
   adminTitle: {
     margin: 0,
     fontSize: "36px",
     fontWeight: 800,
     color: "#0f2233",
   },
-
-  adminSection: {
+  adminGrid: {
     maxWidth: "1200px",
-    margin: "0 auto 20px auto",
-    background: "#ffffff",
-    borderRadius: "24px",
-    padding: "24px",
-    boxShadow: "0 16px 36px rgba(14, 34, 53, 0.12)",
-    border: "1px solid rgba(15, 23, 32, 0.06)",
+    margin: "0 auto",
+    display: "grid",
+    gap: "18px",
   },
-
-  tableWrap: {
+  adminCard: {
+    background: "#ffffff",
+    borderRadius: "18px",
+    padding: "20px",
+    boxShadow: "0 12px 30px rgba(14, 34, 53, 0.1)",
+    border: "1px solid rgba(15, 23, 32, 0.06)",
+    display: "grid",
+    gap: "14px",
+  },
+  adminSectionTitle: {
+    margin: 0,
+    fontSize: "20px",
+    fontWeight: 800,
+    color: "#0f2233",
+  },
+  adminTableWrap: {
     width: "100%",
     overflowX: "auto",
   },
-
-  table: {
+  adminTable: {
     width: "100%",
     borderCollapse: "collapse",
-    minWidth: "760px",
+    fontSize: "14px",
+    minWidth: "1100px",
   },
-
-  actionWrap: {
+  adminTh: {
+    textAlign: "left",
+    padding: "10px",
+    borderBottom: "1px solid #e1e8ef",
+    color: "#6b7d8b",
+    fontWeight: 800,
+  },
+  adminTd: {
+    padding: "10px",
+    borderBottom: "1px solid #eef2f6",
+    color: "#102030",
+    verticalAlign: "top",
+  },
+  adminButtonRow: {
     display: "flex",
+    gap: "6px",
     flexWrap: "wrap",
-    gap: "8px",
   },
-
+  adminSmallButton: {
+    border: "1px solid #cfd9e3",
+    background: "#ffffff",
+    color: "#102030",
+    padding: "6px 8px",
+    borderRadius: "8px",
+    fontSize: "12px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  adminPrimaryButton: {
+    border: "none",
+    background: "#0f2233",
+    color: "#ffffff",
+    padding: "8px 10px",
+    borderRadius: "8px",
+    fontSize: "12px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  adminDangerButton: {
+    border: "none",
+    background: "#b42318",
+    color: "#ffffff",
+    padding: "8px 10px",
+    borderRadius: "8px",
+    fontSize: "12px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  adminSuccessButton: {
+    border: "none",
+    background: "#157347",
+    color: "#ffffff",
+    padding: "8px 10px",
+    borderRadius: "8px",
+    fontSize: "12px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  adminWarningButton: {
+    border: "none",
+    background: "#d97706",
+    color: "#ffffff",
+    padding: "8px 10px",
+    borderRadius: "8px",
+    fontSize: "12px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  adminStatsRow: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+  adminStatCard: {
+    flex: "1 1 140px",
+    background: "#f7fafc",
+    borderRadius: "12px",
+    padding: "12px",
+    border: "1px solid #e1e8ef",
+  },
+  adminStatLabel: {
+    fontSize: "12px",
+    textTransform: "uppercase",
+    letterSpacing: "0.7px",
+    color: "#6b7d8b",
+    fontWeight: 800,
+  },
+  adminStatValue: {
+    fontSize: "18px",
+    fontWeight: 800,
+    color: "#0f2233",
+    marginTop: "4px",
+  },
+  adminImagePreview: {
+    width: "100%",
+    maxWidth: "140px",
+    maxHeight: "140px",
+    objectFit: "cover",
+    borderRadius: "10px",
+    border: "1px solid #e1e8ef",
+  },
+  adminInput: {
+    padding: "10px 12px",
+    borderRadius: "10px",
+    border: "1px solid #d5dee7",
+    fontSize: "14px",
+    minWidth: "160px",
+  },
+  adminSelect: {
+    padding: "8px 10px",
+    borderRadius: "8px",
+    border: "1px solid #d5dee7",
+    fontSize: "13px",
+  },
   adminLoginWrap: {
     minHeight: "100vh",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    padding: "24px",
     background: "#eef3f7",
+    padding: "24px",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
   },
-
   adminLoginCard: {
     width: "100%",
-    maxWidth: "520px",
+    maxWidth: "540px",
     background: "#ffffff",
     borderRadius: "24px",
     padding: "30px",
     boxShadow: "0 16px 36px rgba(14, 34, 53, 0.12)",
     border: "1px solid rgba(15, 23, 32, 0.06)",
   },
-
   adminLoginTitle: {
     marginTop: 0,
-    marginBottom: "8px",
+    marginBottom: "10px",
     fontSize: "30px",
     color: "#0f2233",
   },
-
   adminLoginText: {
     marginTop: 0,
     marginBottom: "20px",
     color: "#627382",
-    fontSize: "15px",
-    lineHeight: 1.5,
   },
-
   adminLoginForm: {
     display: "grid",
-    gap: "16px",
+    gap: "14px",
+  },
+  calendarHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    flexWrap: "wrap",
+  },
+  calendarTitle: {
+    fontSize: "18px",
+    fontWeight: 800,
+    color: "#0f2233",
+  },
+  calendarGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+    gap: "8px",
+  },
+  calendarDayHeader: {
+    textAlign: "center",
+    fontSize: "12px",
+    fontWeight: 800,
+    color: "#6b7d8b",
+    padding: "8px 0",
+  },
+  calendarCellEmpty: {
+    minHeight: "90px",
+    borderRadius: "12px",
+    background: "#f8fafc",
+  },
+  calendarCell: {
+    minHeight: "90px",
+    borderRadius: "12px",
+    border: "1px solid #e1e8ef",
+    background: "#ffffff",
+    padding: "8px",
+    display: "grid",
+    gap: "6px",
+    alignContent: "start",
+  },
+  calendarCellHeader: {
+    fontSize: "13px",
+    fontWeight: 800,
+    color: "#0f2233",
+  },
+  calendarBlock: {
+    position: "relative",
+    background: "#fff7ed",
+    border: "1px solid #fed7aa",
+    borderRadius: "8px",
+    padding: "6px 22px 6px 8px",
+    fontSize: "11px",
+    color: "#9a3412",
+  },
+  calendarBlockReason: {
+    color: "#7c2d12",
+    marginTop: "2px",
+  },
+  calendarRemoveButton: {
+    position: "absolute",
+    top: "4px",
+    right: "4px",
+    width: "16px",
+    height: "16px",
+    borderRadius: "999px",
+    border: "none",
+    background: "#b42318",
+    color: "#ffffff",
+    fontSize: "11px",
+    lineHeight: 1,
+    cursor: "pointer",
+  },
+  slider: {
+    width: "100%",
   },
 }

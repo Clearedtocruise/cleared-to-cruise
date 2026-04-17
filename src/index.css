@@ -109,3 +109,24 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+/* DatePicker Input */
+.ctc-datepicker-input {
+  width: 100%;
+  padding: 13px 14px;
+  border-radius: 12px;
+  border: 1px solid #d5dee7;
+  background: #fbfdff;
+  font-size: 15px;
+  color: #102030;
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* Unavailable Dates */
+.ctc-unavailable-day {
+  background-color: rgba(180, 35, 24, 0.18) !important;
+  color: #b42318 !important;
+  border-radius: 999px !important;
+  pointer-events: none;
+  opacity: 0.45;
+}
