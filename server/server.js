@@ -364,6 +364,24 @@ const db = new sqlite3.Database(dbPath, (err) => {
     console.log("Connected to SQLite database.")
   }
 })
+db.all(`PRAGMA table_info(testimonials)`, [], (err, rows) => {
+  if (err) {
+    console.error("TESTIMONIALS PRAGMA ERROR:", err)
+    return
+  }
+
+  const existing = new Set(rows.map((r) => r.name))
+
+  if (!existing.has("photos")) {
+    db.run(`ALTER TABLE testimonials ADD COLUMN photos TEXT`, [], (alterErr) => {
+      if (alterErr) {
+        console.error("ALTER testimonials photos ERROR:", alterErr)
+      } else {
+        console.log("Added photos column to testimonials")
+      }
+    })
+  }
+})
 
 function runAsync(sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -931,19 +949,20 @@ db.serialize(() => {
     )
   `)
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS testimonials (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      customerName TEXT NOT NULL,
-      customerEmail TEXT,
-      rentalLabel TEXT,
-      testimonialText TEXT NOT NULL,
-      photoPath TEXT,
-      isApproved INTEGER NOT NULL DEFAULT 0,
-      isActive INTEGER NOT NULL DEFAULT 1,
-      createdAt TEXT NOT NULL
-    )
-  `)
+db.run(`
+  CREATE TABLE IF NOT EXISTS testimonials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customerName TEXT NOT NULL,
+    customerEmail TEXT,
+    rentalLabel TEXT,
+    testimonialText TEXT NOT NULL,
+    photoPath TEXT,
+    photos TEXT,
+    isApproved INTEGER NOT NULL DEFAULT 0,
+    isActive INTEGER NOT NULL DEFAULT 1,
+    createdAt TEXT NOT NULL
+  )
+`)
 
   const bookingColumns = [
     ["userId", "TEXT"],
@@ -982,64 +1001,24 @@ db.serialize(() => {
     ["createdAt", "TEXT"],
   ]
 
-  db.all(`PRAGMA table_info(bookings)`, [], (err, rows) => {
-    if (err) {
-      console.error("BOOKINGS PRAGMA ERROR:", err)
-      return
-    }
+db.all(`PRAGMA table_info(testimonials)`, [], (err, rows) => {
+  if (err) {
+    console.error("TESTIMONIALS PRAGMA ERROR:", err)
+    return
+  }
 
-    const existing = new Set(rows.map((r) => r.name))
-    bookingColumns.forEach(([name, type]) => {
-      if (!existing.has(name)) {
-        db.run(`ALTER TABLE bookings ADD COLUMN ${name} ${type}`, [], (alterErr) => {
-          if (alterErr) {
-            console.error(`ALTER bookings add ${name} ERROR:`, alterErr)
-          }
-        })
+  const existing = new Set(rows.map((r) => r.name))
+
+  if (!existing.has("photos")) {
+    db.run(`ALTER TABLE testimonials ADD COLUMN photos TEXT`, [], (alterErr) => {
+      if (alterErr) {
+        console.error("ALTER testimonials photos ERROR:", alterErr)
+      } else {
+        console.log("Added photos column to testimonials")
       }
     })
-
-    db.run(
-      `UPDATE bookings SET createdAt = COALESCE(createdAt, datetime('now')) WHERE createdAt IS NULL OR createdAt = ''`,
-      [],
-      (updateErr) => {
-        if (updateErr) console.error("BOOKINGS createdAt backfill ERROR:", updateErr)
-      }
-    )
-
-    // migrate old pontoon labels to new naming
-    db.run(
-      `
-      UPDATE bookings
-      SET rentalLabel = CASE
-        WHEN rentalLabel = 'Pontoon - 6 Hours' THEN 'Pontoon - Half Day'
-        WHEN rentalLabel IN ('Pontoon - 8 Hours', 'Pontoon - 10 Hours') THEN 'Pontoon - Full Day'
-        ELSE rentalLabel
-      END
-      WHERE rentalLabel IN ('Pontoon - 6 Hours', 'Pontoon - 8 Hours', 'Pontoon - 10 Hours')
-      `,
-      [],
-      (migrateErr) => {
-        if (migrateErr) console.error("BOOKINGS pontoon migration ERROR:", migrateErr)
-      }
-    )
-
-    db.run(
-      `
-      UPDATE bookings
-      SET boatType = CASE
-        WHEN LOWER(COALESCE(rentalLabel, '')) LIKE '%pontoon%' THEN 'Pontoon'
-        WHEN LOWER(COALESCE(rentalLabel, '')) LIKE '%bass%' THEN 'Bass Boat'
-        WHEN LOWER(COALESCE(rentalLabel, '')) LIKE '%jet ski%' THEN 'Jet Ski'
-        ELSE boatType
-      END
-      `,
-      [],
-      (boatTypeErr) => {
-        if (boatTypeErr) console.error("BOOKINGS boatType migration ERROR:", boatTypeErr)
-      }
-    )
-  })
+  }
+})
 
   db.all(`PRAGMA table_info(blocked_dates)`, [], (err, rows) => {
     if (err) {
@@ -1203,7 +1182,7 @@ app.get("/api/testimonials", async (_req, res) => {
   try {
     const rows = await allAsync(
       `
-      SELECT id, customerName, rentalLabel, testimonialText, photoPath, createdAt
+      SELECT id, customerName, customerEmail, rentalLabel, testimonialText, photoPath, photos, createdAt
       FROM testimonials
       WHERE isApproved = 1
         AND isActive = 1
@@ -1211,10 +1190,25 @@ app.get("/api/testimonials", async (_req, res) => {
       `
     )
 
-    const formatted = rows.map((row) => ({
-      ...row,
-      photoUrl: buildUploadsUrl(row.photoPath),
-    }))
+    const formatted = rows.map((row) => {
+      let parsedPhotos = []
+
+      try {
+        parsedPhotos = row.photos ? JSON.parse(row.photos) : []
+      } catch {
+        parsedPhotos = []
+      }
+
+      const normalizedPhotos = Array.isArray(parsedPhotos)
+        ? parsedPhotos.map((p) => buildUploadsUrl(p))
+        : []
+
+      return {
+        ...row,
+        photoUrl: row.photoPath ? buildUploadsUrl(row.photoPath) : "",
+        photos: normalizedPhotos,
+      }
+    })
 
     return res.json(formatted)
   } catch (err) {
@@ -1223,19 +1217,22 @@ app.get("/api/testimonials", async (_req, res) => {
   }
 })
 
-app.post("/api/testimonials", upload.single("photo"), async (req, res) => {
+app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
   const customerName = String(req.body.customerName || req.body.name || "").trim()
   const testimonialText = String(req.body.testimonialText || req.body.text || "").trim()
   const rentalLabel = normalizeRentalLabel(req.body.rentalLabel || "")
   const customerEmail = normalizeEmail(req.body.customerEmail || "")
   const createdAt = new Date().toISOString()
-  
 
   if (!customerName || !testimonialText) {
     return res.status(400).json({ error: "Name and testimonial text are required." })
   }
 
   try {
+    const files = Array.isArray(req.files) ? req.files : []
+    const photoPaths = files.map((file) => `./uploads/${file.filename}`)
+    const legacyPhotoPath = photoPaths.length > 0 ? photoPaths[0] : null
+
     const result = await runAsync(
       `
       INSERT INTO testimonials (
@@ -1244,18 +1241,20 @@ app.post("/api/testimonials", upload.single("photo"), async (req, res) => {
         rentalLabel,
         testimonialText,
         photoPath,
+        photos,
         isApproved,
         isActive,
         createdAt
       )
-      VALUES (?, ?, ?, ?, ?, 0, 1, ?)
+      VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?)
       `,
       [
         customerName,
         customerEmail || null,
         rentalLabel || null,
         testimonialText,
-        req.file ? `./uploads/${req.file.filename}` : null,
+        legacyPhotoPath,
+        JSON.stringify(photoPaths),
         createdAt,
       ]
     )
@@ -1270,6 +1269,7 @@ Testimonial ID: ${result.lastID}
 Name: ${customerName}
 Rental: ${rentalLabel || "Not provided"}
 Email: ${customerEmail || "Not provided"}
+Photo Count: ${photoPaths.length}
       `.trim(),
       html: `
         <h2>New testimonial submission</h2>
@@ -1277,9 +1277,12 @@ Email: ${customerEmail || "Not provided"}
         <p><strong>Name:</strong> ${escapeHtml(customerName)}</p>
         <p><strong>Rental:</strong> ${escapeHtml(rentalLabel || "Not provided")}</p>
         <p><strong>Email:</strong> ${escapeHtml(customerEmail || "Not provided")}</p>
+        <p><strong>Photo Count:</strong> ${photoPaths.length}</p>
         <p>This testimonial is waiting for admin approval.</p>
       `,
-      attachments: req.file ? bookingPhotoAttachment(`./uploads/${req.file.filename}`) : [],
+      attachments: photoPaths
+        .map((p) => bookingPhotoAttachment(p))
+        .flat(),
     }).catch((err) => {
       console.error("TESTIMONIAL ADMIN EMAIL ERROR:", err)
     })
@@ -1307,21 +1310,35 @@ app.put("/api/admin/testimonials/:id/approve", async (req, res) => {
   }
 })
 
-app.get("/api/admin/testimonials", requireAdminLogin, async (_req, res) => {
+app.get("/api/admin/testimonials", async (_req, res) => {
   try {
     const rows = await allAsync(
       `
-      SELECT *
+      SELECT id, customerName, customerEmail, rentalLabel, testimonialText, photoPath, photos, isApproved, isActive, createdAt
       FROM testimonials
-      WHERE isActive = 1
       ORDER BY id DESC
       `
     )
 
-    const formatted = rows.map((row) => ({
-      ...row,
-      photoUrl: buildUploadsUrl(row.photoPath),
-    }))
+    const formatted = rows.map((row) => {
+      let parsedPhotos = []
+
+      try {
+        parsedPhotos = row.photos ? JSON.parse(row.photos) : []
+      } catch {
+        parsedPhotos = []
+      }
+
+      const normalizedPhotos = Array.isArray(parsedPhotos)
+        ? parsedPhotos.map((p) => buildUploadsUrl(p))
+        : []
+
+      return {
+        ...row,
+        photoUrl: row.photoPath ? buildUploadsUrl(row.photoPath) : "",
+        photos: normalizedPhotos,
+      }
+    })
 
     return res.json(formatted)
   } catch (err) {
@@ -1330,14 +1347,14 @@ app.get("/api/admin/testimonials", requireAdminLogin, async (_req, res) => {
   }
 })
 
-app.post("/api/admin/testimonials/:id/approve", requireAdminLogin, async (req, res) => {
+app.post("/api/admin/testimonials/:id/deny", requireAdminLogin, async (req, res) => {
   try {
     const result = await runAsync(
       `
       UPDATE testimonials
-      SET isApproved = 1
+      SET isActive = 0,
+          isApproved = 0
       WHERE id = ?
-        AND isActive = 1
       `,
       [req.params.id]
     )
@@ -1346,10 +1363,92 @@ app.post("/api/admin/testimonials/:id/approve", requireAdminLogin, async (req, r
       return res.status(404).json({ error: "Testimonial not found." })
     }
 
-    return res.json({ success: true, message: "Testimonial approved." })
+    return res.json({ success: true, message: "Testimonial removed." })
+  } catch (err) {
+    console.error("DENY TESTIMONIAL ERROR:", err)
+    return res.status(500).json({ error: "Could not remove testimonial." })
+  }
+})
+
+app.put("/api/admin/testimonials/:id/approve", async (req, res) => {
+  const id = req.params.id
+
+  try {
+    await runAsync(
+      `UPDATE testimonials SET isApproved = 1 WHERE id = ?`,
+      [id]
+    )
+
+    return res.json({ success: true })
   } catch (err) {
     console.error("APPROVE TESTIMONIAL ERROR:", err)
-    return res.status(500).json({ error: "Could not approve testimonial." })
+    return res.status(500).json({ error: "Failed to approve testimonial" })
+  }
+})
+
+app.get("/api/admin/testimonials", async (_req, res) => {
+  try {
+    const rows = await allAsync(
+      `
+      SELECT id, customerName, rentalLabel, testimonialText, photoPath, photoPaths, isApproved, isActive, createdAt
+      FROM testimonials
+      ORDER BY id DESC
+      `
+    )
+
+    const formatted = rows.map((row) => {
+      let parsedPhotos = []
+
+      try {
+        parsedPhotos = row.photoPaths ? JSON.parse(row.photoPaths) : []
+      } catch {
+        parsedPhotos = []
+      }
+
+      const normalizedPhotos = Array.isArray(parsedPhotos)
+        ? parsedPhotos.map((p) => buildUploadsUrl(p))
+        : []
+
+      return {
+        ...row,
+        photoUrl: row.photoPath ? buildUploadsUrl(row.photoPath) : "",
+        photos: normalizedPhotos,
+      }
+    })
+
+    return res.json(formatted)
+  } catch (err) {
+    console.error("ADMIN TESTIMONIALS ERROR:", err)
+    return res.status(500).json({ error: "Could not load testimonials." })
+  }
+})
+app.post("/api/testimonials", upload.array("photos", 5), (req, res) => {
+  try {
+    const { name, text } = req.body
+
+    if (!name || !text) {
+      return res.status(400).json({ error: "Name and text required" })
+    }
+
+    // 🔥 Handle multiple photos
+    const photoPaths = req.files ? req.files.map(file => file.path) : []
+
+    const stmt = db.prepare(`
+      INSERT INTO testimonials (name, text, photos, approved)
+      VALUES (?, ?, ?, 0)
+    `)
+
+    stmt.run(name, text, JSON.stringify(photoPaths), function (err) {
+      if (err) {
+        console.error(err)
+        return res.status(500).json({ error: "Failed to save testimonial" })
+      }
+
+      res.json({ success: true })
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: "Server error" })
   }
 })
 
@@ -3909,7 +4008,7 @@ db.serialize(() => {
       name TEXT,
       email TEXT,
       message TEXT,
-      photoUrl TEXT,
+      photos TEXT,
       rating INTEGER,
       status TEXT DEFAULT 'pending',
       createdAt TEXT DEFAULT (datetime('now')),
