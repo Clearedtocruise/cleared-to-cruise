@@ -562,35 +562,93 @@ function TestimonialsSection({ testimonials, onSubmitted }) {
 
       {Array.isArray(testimonials) && testimonials.length > 0 ? (
         <div style={styles.lookupList}>
-          {testimonials.map((item) => (
-            <div key={item.id} style={styles.lookupCard}>
-              <div style={styles.lookupRow}>
-                <strong>{item.customerName || item.name || "Customer"}</strong>
-              </div>
+{Array.isArray(testimonials) && testimonials.length > 0 ? (
+  <div style={styles.testimonialSliderWrap}>
+    
+    <button
+      type="button"
+      onClick={prevTestimonial}
+      style={styles.testimonialArrow}
+    >
+      ‹
+    </button>
 
-              {item.rentalLabel ? (
-                <div style={styles.lookupRow}>
-                  <strong>Rental:</strong> {item.rentalLabel}
-                </div>
-              ) : null}
+    {(() => {
+      const item = testimonials[activeTestimonialIndex]
+      const photos =
+        item.photos && Array.isArray(item.photos)
+          ? item.photos
+          : item.photoUrl
+            ? [item.photoUrl]
+            : []
 
-              <div style={styles.lookupRow}>
-                {item.testimonialText || item.text || ""}
-              </div>
+      const activePhotoIndex = activePhotoIndexes[activeTestimonialIndex] || 0
 
-              {item.photoUrl ? (
-                <img
-                  src={item.photoUrl}
-                  alt="Customer testimonial"
-                  style={styles.testimonialImage}
-                />
-              ) : null}
+      return (
+        <div key={item.id} style={styles.lookupCard}>
+          <div style={styles.lookupRow}>
+            <strong>{item.customerName || item.name || "Customer"}</strong>
+          </div>
+
+          {item.rentalLabel && (
+            <div style={styles.lookupRow}>
+              <strong>Rental:</strong> {item.rentalLabel}
             </div>
-          ))}
+          )}
+
+          <div style={styles.lookupRow}>
+            {item.testimonialText || item.text || ""}
+          </div>
+
+          {photos.length > 0 && (
+            <div style={styles.testimonialPhotoWrap}>
+              <img
+                src={photos[activePhotoIndex]}
+                alt="testimonial"
+                style={styles.testimonialImage}
+              />
+
+              {photos.length > 1 && (
+                <div style={styles.testimonialPhotoControls}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      prevPhoto(activeTestimonialIndex, photos.length)
+                    }
+                    style={styles.testimonialPhotoArrow}
+                  >
+                    ‹
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      nextPhoto(activeTestimonialIndex, photos.length)
+                    }
+                    style={styles.testimonialPhotoArrow}
+                  >
+                    ›
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      ) : (
-        <div style={styles.infoBox}>No approved testimonials are live yet.</div>
-      )}
+      )
+    })()}
+
+    <button
+      type="button"
+      onClick={nextTestimonial}
+      style={styles.testimonialArrow}
+    >
+      ›
+    </button>
+
+  </div>
+) : (
+  <div style={styles.infoBox}>No approved testimonials yet.</div>
+)}
 
       <form onSubmit={submitTestimonial} style={{ marginTop: "20px" }}>
         <div style={styles.formGrid}>
@@ -2779,6 +2837,39 @@ function CancelPage() {
 function MainApp() {
   const [rentalOptions, setRentalOptions] = useState(fallbackRentalOptions)
   const [testimonials, setTestimonials] = useState([])
+  const [activeTestimonialIndex, setActiveTestimonialIndex] = useState(0)
+const [activePhotoIndexes, setActivePhotoIndexes] = useState({})
+function nextTestimonial() {
+  setActiveTestimonialIndex((prev) =>
+    prev === testimonials.length - 1 ? 0 : prev + 1
+  )
+}
+
+function prevTestimonial() {
+  setActiveTestimonialIndex((prev) =>
+    prev === 0 ? testimonials.length - 1 : prev - 1
+  )
+}
+
+function nextPhoto(testimonialIndex, photosLength) {
+  setActivePhotoIndexes((prev) => {
+    const current = prev[testimonialIndex] || 0
+    return {
+      ...prev,
+      [testimonialIndex]: current === photosLength - 1 ? 0 : current + 1
+    }
+  })
+}
+
+function prevPhoto(testimonialIndex, photosLength) {
+  setActivePhotoIndexes((prev) => {
+    const current = prev[testimonialIndex] || 0
+    return {
+      ...prev,
+      [testimonialIndex]: current === 0 ? photosLength - 1 : current - 1
+    }
+  })
+}
 
   const [rental, setRental] = useState("Jet Ski (Single)")
   const [date, setDate] = useState("")
