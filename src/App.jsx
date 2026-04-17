@@ -494,7 +494,7 @@ function buildCalendarDays(monthDate) {
   return cells
 }
 
-function TestimonialsSection({ testimonials = [] }) {
+function TestimonialsSection({ testimonials = [], onSubmitted }) {
   const [testimonialName, setTestimonialName] = useState("")
   const [testimonialText, setTestimonialText] = useState("")
  const [testimonialPhotos, setTestimonialPhotos] = useState([])
