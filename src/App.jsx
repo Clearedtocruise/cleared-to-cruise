@@ -646,10 +646,6 @@ testimonialPhotos.forEach((file) => {
     </section>
   )
 }
-<TestimonialsSection
-  testimonials={testimonials}
-  onSubmitted={loadTestimonials}
-/>
 
 function BookingLookupCard({ onLoadBooking }) {
   const [lookupBookingId, setLookupBookingId] = useState("")
