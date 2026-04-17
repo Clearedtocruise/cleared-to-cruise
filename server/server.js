@@ -2201,7 +2201,63 @@ async function approveBookingCore(id) {
     ...updated,
     rentalLabel: normalizeRentalLabel(updated.rentalLabel),
   }
+if (
+  normalizedUpdated.customerEmail &&
+  isWithinNextThreeDays(normalizedUpdated.date) &&
+  (
+    !normalizedUpdated.depositStatus ||
+    normalizedUpdated.depositStatus === "not_scheduled"
+  )
+) {
+  const depositUrl = formatDepositRequestUrl(normalizedUpdated.id)
 
+  try {
+    await sendEmail({
+      to: normalizedUpdated.customerEmail,
+      subject: `Security deposit authorization for booking #${normalizedUpdated.id}`,
+      text: `
+Your rental is coming up soon.
+
+Please authorize your refundable $500 security deposit using the link below.
+
+Booking ID: ${normalizedUpdated.id}
+Rental: ${normalizedUpdated.rentalLabel || "Boat Rental"}
+Date: ${normalizedUpdated.date || "Not provided"}
+
+Authorize deposit:
+${depositUrl}
+      `.trim(),
+      html: `
+        <h2>Security deposit authorization needed</h2>
+        <p>Your rental is coming up soon.</p>
+        <p>Please authorize your refundable <strong>$500 security deposit</strong> using the button below.</p>
+        <p><strong>Booking ID:</strong> ${normalizedUpdated.id}</p>
+        <p><strong>Rental:</strong> ${escapeHtml(normalizedUpdated.rentalLabel || "Boat Rental")}</p>
+        <p><strong>Date:</strong> ${escapeHtml(normalizedUpdated.date || "Not provided")}</p>
+        <p>
+          <a href="${depositUrl}" style="display:inline-block;padding:12px 18px;background:#0f2233;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">
+            Authorize Deposit
+          </a>
+        </p>
+      `,
+    })
+
+    await runAsync(
+      `
+      UPDATE bookings
+      SET depositRequestedAt = datetime('now'),
+          depositLinkSentAt = datetime('now'),
+          depositStatus = 'requested'
+      WHERE id = ?
+      `,
+      [normalizedUpdated.id]
+    )
+
+    normalizedUpdated.depositStatus = "requested"
+  } catch (err) {
+    console.error("IMMEDIATE DEPOSIT EMAIL ERROR:", err)
+  }
+}
   await sendStatusEmails(normalizedUpdated, "approved_unpaid")
 
   return { booking: normalizedUpdated }
