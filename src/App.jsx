@@ -3240,6 +3240,9 @@ setShowWaiver(true)
     setDate(formatted)
     checkAvailability(formatted, rental)
   }}
+  onMonthChange={(dateObj) => {
+    loadUnavailableDates(rental, dateObj)
+  }}
   excludeDates={unavailableDates}
   minDate={new Date()}
   placeholderText="Select a rental date"

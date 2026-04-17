@@ -1462,6 +1462,36 @@ async function checkRentalAvailability(date, rentalLabel) {
     return true
   }
 
+  if (boatType === "Pontoon") {
+    const bookingRow = await getAsync(
+      `
+      SELECT COUNT(*) AS count
+      FROM bookings
+      WHERE date = ?
+        AND boatType = 'Pontoon'
+        AND status IN ('pending_approval', 'approved_unpaid', 'pending_payment', 'confirmed')
+      `,
+      [date]
+    )
+
+    return (bookingRow?.count || 0) === 0
+  }
+
+  if (boatType === "Bass Boat") {
+    const bookingRow = await getAsync(
+      `
+      SELECT COUNT(*) AS count
+      FROM bookings
+      WHERE date = ?
+        AND boatType = 'Bass Boat'
+        AND status IN ('pending_approval', 'approved_unpaid', 'pending_payment', 'confirmed')
+      `,
+      [date]
+    )
+
+    return (bookingRow?.count || 0) === 0
+  }
+
   const bookingRow = await getAsync(
     `
     SELECT COUNT(*) AS count
@@ -1475,6 +1505,7 @@ async function checkRentalAvailability(date, rentalLabel) {
 
   return (bookingRow?.count || 0) === 0
 }
+
 app.get("/api/availability", async (req, res) => {
   const rentalLabel = normalizeRentalLabel(req.query.rentalLabel)
   const { date } = req.query
