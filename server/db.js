@@ -39,5 +39,15 @@ db.serialize(() => {
     )
   `)
 })
-
+db.run(`
+  CREATE TABLE IF NOT EXISTS testimonials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fullName TEXT,
+    rating INTEGER,
+    message TEXT NOT NULL,
+    approved INTEGER DEFAULT 0,
+    createdAt TEXT NOT NULL,
+    photos TEXT
+  )
+`)
 module.exports = db
