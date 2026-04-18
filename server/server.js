@@ -1162,7 +1162,7 @@ app.post("/api/admin/pricing", requireAdminLogin, async (req, res) => {
 app.get("/api/testimonials", async (req, res) => {
   try {
     const rows = await allAsync(
-      "SELECT id, fullName, message, rating, createdAt, photos FROM testimonials WHERE approved = 1 ORDER BY createdAt DESC"
+      "SELECT id, fullName, message, rating, createdAt, photos FROM testimonials ORDER BY createdAt DESC"
     )
 
     res.json(rows)
