@@ -364,25 +364,6 @@ const db = new sqlite3.Database(dbPath, (err) => {
     console.log("Connected to SQLite database.")
   }
 })
-db.all(`PRAGMA table_info(testimonials)`, [], (err, rows) => {
-  if (err) {
-    console.error("TESTIMONIALS PRAGMA ERROR:", err)
-    return
-  }
-
-  const existing = new Set(rows.map((r) => r.name))
-
-  if (!existing.has("photos")) {
-    db.run(`ALTER TABLE testimonials ADD COLUMN photos TEXT`, [], (alterErr) => {
-      if (alterErr) {
-        console.error("ALTER testimonials photos ERROR:", alterErr)
-      } else {
-        console.log("Added photos column to testimonials")
-      }
-    })
-  }
-})
-
 function runAsync(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function (err) {
