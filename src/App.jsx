@@ -577,12 +577,12 @@ testimonialPhotos.forEach((file) => {
     <div style={styles.lookupCard}>
       <div style={styles.lookupRow}>
         <strong>
-          {testimonials[activeTestimonialIndex]?.customerName || "Customer"}
+          {testimonials[activeTestimonialIndex]?.fullName || "Customer"}
         </strong>
       </div>
 
       <div style={{ marginTop: "8px" }}>
-        {testimonials[activeTestimonialIndex]?.testimonialText || ""}
+        {testimonials[activeTestimonialIndex]?.message || ""}
       </div>
     </div>
 
