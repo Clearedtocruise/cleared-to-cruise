@@ -535,7 +535,7 @@ testimonialPhotos.forEach((file) => {
   formData.append("photos", file)
 })
 
-      const res = await fetch("/api/testimonials", {
+      const res = await fetch(`${API}/api/testimonials`, {
         method: "POST",
         body: formData,
       })
