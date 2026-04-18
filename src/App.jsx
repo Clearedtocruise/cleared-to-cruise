@@ -564,39 +564,39 @@ testimonialPhotos.forEach((file) => {
         </div>
       </div>
 
-      {Array.isArray(testimonials) && testimonials.length > 0 ? (
-        <div style={styles.testimonialSliderWrap}>
-          <button
-            type="button"
-            onClick={prevTestimonial}
-            style={styles.testimonialArrow}
-          >
-            {"<"}
-          </button>
+{Array.isArray(testimonials) && testimonials.length > 0 ? (
+  <div style={styles.testimonialSliderWrap}>
+    <button
+      type="button"
+      onClick={prevTestimonial}
+      style={styles.testimonialArrow}
+    >
+      {"<"}
+    </button>
 
-          <div style={styles.lookupCard}>
-            <div style={styles.lookupRow}>
-              <strong>
-                {testimonials[activeTestimonialIndex]?.customerName || "Customer"}
-              </strong>
-            </div>
+    <div style={styles.lookupCard}>
+      <div style={styles.lookupRow}>
+        <strong>
+          {testimonials[activeTestimonialIndex]?.customerName || "Customer"}
+        </strong>
+      </div>
 
-            <div style={styles.lookupRow}>
-              {testimonials[activeTestimonialIndex]?.testimonialText || ""}
-            </div>
-          </div>
+      <div style={{ marginTop: "8px" }}>
+        {testimonials[activeTestimonialIndex]?.testimonialText || ""}
+      </div>
+    </div>
 
-          <button
-            type="button"
-            onClick={nextTestimonial}
-            style={styles.testimonialArrow}
-          >
-            {">"}
-          </button>
-        </div>
-      ) : (
-        <div style={styles.infoBox}>No approved testimonials yet.</div>
-      )}
+    <button
+      type="button"
+      onClick={nextTestimonial}
+      style={styles.testimonialArrow}
+    >
+      {">"}
+    </button>
+  </div>
+) : (
+  <div style={styles.infoBox}>No approved testimonials yet.</div>
+)}
 
       <form onSubmit={submitTestimonial} style={{ marginTop: "20px" }}>
         <div style={styles.formGrid}>
@@ -2826,6 +2826,9 @@ async function loadTestimonials() {
     setTestimonials([])
   }
 }
+useEffect(() => {
+  loadTestimonials()
+}, [])
 
   const [rental, setRental] = useState("Jet Ski (Single)")
   const [date, setDate] = useState("")

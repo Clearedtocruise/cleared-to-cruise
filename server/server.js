@@ -1182,35 +1182,32 @@ app.get("/api/testimonials", async (_req, res) => {
   try {
     const rows = await allAsync(
       `
-      SELECT id, customerName, customerEmail, rentalLabel, testimonialText, photoPath, photos, createdAt
+      SELECT
+        id,
+        fullName,
+        message,
+        rating,
+        approved,
+        createdAt
       FROM testimonials
-      WHERE isApproved = 1
-        AND isActive = 1
+      WHERE approved = 1
       ORDER BY id DESC
       `
     )
 
-    const formatted = rows.map((row) => {
-      let parsedPhotos = []
+    const normalized = rows.map((row) => ({
+      id: row.id,
+      customerName: row.fullName || "Customer",
+      testimonialText: row.message || "",
+      rating: row.rating || 5,
+      createdAt: row.createdAt || "",
+      photos: [],
+      photoUrl: "",
+      customerEmail: "",
+      rentalLabel: ""
+    }))
 
-      try {
-        parsedPhotos = row.photos ? JSON.parse(row.photos) : []
-      } catch {
-        parsedPhotos = []
-      }
-
-      const normalizedPhotos = Array.isArray(parsedPhotos)
-        ? parsedPhotos.map((p) => buildUploadsUrl(p))
-        : []
-
-      return {
-        ...row,
-        photoUrl: row.photoPath ? buildUploadsUrl(row.photoPath) : "",
-        photos: normalizedPhotos,
-      }
-    })
-
-    return res.json(formatted)
+    return res.json(normalized)
   } catch (err) {
     console.error("PUBLIC TESTIMONIALS ERROR:", err)
     return res.status(500).json({ error: "Could not load testimonials." })
@@ -1299,7 +1296,7 @@ app.put("/api/admin/testimonials/:id/approve", async (req, res) => {
 
   try {
     await runAsync(
-      `UPDATE testimonials SET isApproved = 1 WHERE id = ?`,
+      `UPDATE testimonials SET Approved = 1 WHERE id = ?`,
       [id]
     )
 
@@ -1352,8 +1349,7 @@ app.post("/api/admin/testimonials/:id/deny", requireAdminLogin, async (req, res)
     const result = await runAsync(
       `
       UPDATE testimonials
-      SET isActive = 0,
-          isApproved = 0
+          Approved = 0
       WHERE id = ?
       `,
       [req.params.id]
@@ -1375,7 +1371,7 @@ app.put("/api/admin/testimonials/:id/approve", async (req, res) => {
 
   try {
     await runAsync(
-      `UPDATE testimonials SET isApproved = 1 WHERE id = ?`,
+      `UPDATE testimonials SET Approved = 1 WHERE id = ?`,
       [id]
     )
 
@@ -1390,7 +1386,7 @@ app.get("/api/admin/testimonials", async (_req, res) => {
   try {
     const rows = await allAsync(
       `
-      SELECT id, customerName, rentalLabel, testimonialText, photoPath, photoPaths, isApproved, isActive, createdAt
+      SELECT id, customerName, rentalLabel, testimonialText, photoPath, photoPaths, Approved, isActive, createdAt
       FROM testimonials
       ORDER BY id DESC
       `
@@ -1458,7 +1454,7 @@ app.post("/api/admin/testimonials/:id/deny", requireAdminLogin, async (req, res)
       `
       UPDATE testimonials
       SET isActive = 0,
-          isApproved = 0
+          Approved = 0
       WHERE id = ?
       `,
       [req.params.id]
