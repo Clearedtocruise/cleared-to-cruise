@@ -520,19 +520,17 @@ function TestimonialsSection({ testimonials = [], onSubmitted }) {
   setTestimonialLoading(true)
 
   try {
-    const formData = new FormData()
-    formData.append("fullName", testimonialName.trim())
-    formData.append("message", testimonialText.trim())
-    formData.append("rating", "5")
-
-    testimonialPhotos.forEach((file) => {
-      formData.append("photos", file)
-    })
-
-    const res = await fetch(`${API}/api/testimonials`, {
-      method: "POST",
-      body: formData,
-    })
+const res = await fetch(`${API}/api/testimonials`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    fullName: testimonialName.trim(),
+    message: testimonialText.trim(),
+    rating: 5,
+  }),
+})
 
     const data = await res.json().catch(() => ({}))
 
