@@ -540,15 +540,20 @@ testimonialPhotos.forEach((file) => {
         body: formData,
       })
 
-      if (!res.ok) throw new Error("Failed to submit")
+if (!res.ok) {
+  const err = await res.json().catch(() => ({}))
+  throw new Error(err.error || "Failed to submit")
+}
+
 
       setTestimonialStatus("Submitted for approval!")
       setTestimonialName("")
       setTestimonialText("")
       setTestimonialPhotos([])
-    } catch (err) {
-      setTestimonialStatus("Error submitting testimonial.")
-    } finally {
+} catch (err) {
+  setTestimonialStatus(err.message)
+}
+     finally {
       setTestimonialLoading(false)
     }
   }
