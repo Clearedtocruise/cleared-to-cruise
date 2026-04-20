@@ -1176,15 +1176,6 @@ app.get("/api/testimonials", async (req, res) => {
   }
 })
 
-app.get("/debug/testimonials", async (req, res) => {
-  try {
-    const rows = await allAsync(`SELECT * FROM testimonials`)
-    res.json(rows)
-  } catch (err) {
-    res.json({ error: err.message })
-  }
-})
-
 // Submit testimonial
 app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
   const fullName = String(req.body.fullName || req.body.customerName || req.body.name || "").trim()
@@ -3583,6 +3574,14 @@ app.get("/api/admin/jobs-status", requireAdminLogin, async (_req, res) => {
   }
 })
 
+app.get("/debug/testimonials", async (req, res) => {
+  try {
+    const rows = await allAsync(`SELECT * FROM testimonials`)
+    res.json(rows)
+  } catch (err) {
+    res.json({ error: err.message })
+  }
+})
 // -----------------------------
 // START
 // -----------------------------
