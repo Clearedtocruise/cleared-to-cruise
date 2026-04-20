@@ -1180,13 +1180,13 @@ app.get("/api/testimonials", async (_req, res) => {
 
     res.json(normalized)
   } catch (err) {
-    console.error("PUBLIC TESTIMONIALS ERROR:", err)
-    res.status(500).json({
-      error: "Failed to load testimonials",
-      details: err.message,
-    })
-  }
-})
+  console.error("PUBLIC TESTIMONIALS ERROR:", err)
+  res.status(500).json({
+    error: "Failed to load testimonials",
+    details: err.message,
+    stack: err.stack
+  })
+}
 
 // Submit testimonial
 app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
