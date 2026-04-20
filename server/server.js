@@ -1169,19 +1169,35 @@ app.get("/api/testimonials", async (_req, res) => {
       ORDER BY id DESC
     `)
 
-    const formatted = rows.map(row => ({
-      id: row.id,
-      fullName: row.fullName,
-      message: row.message,
-      rating: row.rating,
-      createdAt: row.createdAt,
-      photos: row.photos ? JSON.parse(row.photos) : []
-    }))
+    const formatted = rows.map((row) => {
+      let parsedPhotos = []
+
+      try {
+        if (row.photos) {
+          parsedPhotos = JSON.parse(row.photos)
+          if (!Array.isArray(parsedPhotos)) {
+            parsedPhotos = []
+          }
+        }
+      } catch {
+        parsedPhotos = []
+      }
+
+      return {
+        id: row.id,
+        fullName: row.fullName || "",
+        message: row.message || "",
+        rating: Number(row.rating || 5),
+        approved: Number(row.approved || 0),
+        createdAt: row.createdAt || "",
+        photos: parsedPhotos,
+      }
+    })
 
     res.json(formatted)
   } catch (err) {
-    console.error("PUBLIC TESTIMONIAL ERROR:", err)
-    res.status(500).json({ error: "Failed to load testimonials" })
+    console.error("PUBLIC TESTIMONIALS ERROR:", err)
+    res.status(500).json({ error: "Could not load testimonials." })
   }
 })
 
