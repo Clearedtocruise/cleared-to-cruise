@@ -75,6 +75,15 @@ const DEFAULT_PRICING = [
 // -----------------------------
 // HELPERS
 // -----------------------------
+function parseTestimonialPhotos(value) {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -1160,19 +1169,29 @@ app.post("/api/admin/pricing", requireAdminLogin, async (req, res) => {
 // ===============================
 
 // Public testimonials
-app.get("/api/testimonials", async (req, res) => {
+app.get("/api/testimonials", async (_req, res) => {
   try {
     const rows = await allAsync(`
-      SELECT id, fullName, message, rating, approved, photos, createdAt
+      SELECT id, fullName, message, rating, approved, createdAt, photos
       FROM testimonials
       WHERE approved = 1
-      ORDER BY id DESC
+      ORDER BY datetime(createdAt) DESC, id DESC
     `)
 
-    res.json(rows)
+    res.json(
+      rows.map((row) => ({
+        id: row.id,
+        fullName: row.fullName || "",
+        message: row.message || "",
+        rating: Number(row.rating || 5),
+        approved: Number(row.approved || 0),
+        createdAt: row.createdAt || "",
+        photos: parseTestimonialPhotos(row.photos),
+      }))
+    )
   } catch (err) {
     console.error("TESTIMONIAL LOAD ERROR:", err)
-    res.status(500).json({ error: "Failed to load testimonials", details: err.message })
+    res.status(500).json({ error: "Failed to load testimonials" })
   }
 })
 
@@ -3818,25 +3837,21 @@ app.post("/api/admin/bookings/:id/resend-customer-status", requireAdminLogin, as
 })
 
 // -----------------------------
-// TESTIMONIALS TABLE
+// TESTIMONIAL SCHEMA + MIGRATION
 // -----------------------------
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS testimonials (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      bookingId INTEGER,
-      fullName TEXT,
-      email TEXT,
-      message TEXT,
-      photos TEXT,
-      rating INTEGER,
-      approved INTEGER DEFAULT 0,
-      createdAt TEXT DEFAULT (datetime('now')),
-      approvedAt TEXT
+      fullName TEXT NOT NULL,
+      message TEXT NOT NULL,
+      rating INTEGER NOT NULL DEFAULT 5,
+      approved INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      photos TEXT NOT NULL DEFAULT '[]'
     )
   `)
-})
-db.serialize(() => {
+
   db.all(`PRAGMA table_info(testimonials)`, [], (err, rows) => {
     if (err) {
       console.error("TESTIMONIALS PRAGMA ERROR:", err)
@@ -3845,21 +3860,43 @@ db.serialize(() => {
 
     const cols = new Set(rows.map((r) => r.name))
 
-    if (cols.has("name") && !cols.has("fullName")) {
-      db.run(`ALTER TABLE testimonials RENAME COLUMN name TO fullName`, [], (renameErr) => {
-        if (renameErr) console.error("RENAME name TO fullName ERROR:", renameErr)
+    if (!cols.has("photos")) {
+      db.run(`ALTER TABLE testimonials ADD COLUMN photos TEXT NOT NULL DEFAULT '[]'`, [], (alterErr) => {
+        if (alterErr) console.error("ALTER testimonials photos ERROR:", alterErr)
+      })
+    }
+
+    if (!cols.has("rating")) {
+      db.run(`ALTER TABLE testimonials ADD COLUMN rating INTEGER NOT NULL DEFAULT 5`, [], (alterErr) => {
+        if (alterErr) console.error("ALTER testimonials rating ERROR:", alterErr)
       })
     }
 
     if (!cols.has("approved")) {
-      db.run(`ALTER TABLE testimonials ADD COLUMN approved INTEGER DEFAULT 0`, [], (alterErr) => {
-        if (alterErr) console.error("ADD approved COLUMN ERROR:", alterErr)
+      db.run(`ALTER TABLE testimonials ADD COLUMN approved INTEGER NOT NULL DEFAULT 0`, [], (alterErr) => {
+        if (alterErr) console.error("ALTER testimonials approved ERROR:", alterErr)
+      })
+    }
+
+    if (!cols.has("createdAt")) {
+      db.run(`ALTER TABLE testimonials ADD COLUMN createdAt TEXT NOT NULL DEFAULT (datetime('now'))`, [], (alterErr) => {
+        if (alterErr) console.error("ALTER testimonials createdAt ERROR:", alterErr)
       })
     }
   })
+
+  db.run(
+    `
+    UPDATE testimonials
+    SET photos = '[]'
+    WHERE photos IS NULL OR TRIM(photos) = ''
+    `,
+    [],
+    (err) => {
+      if (err) console.error("TESTIMONIAL photos normalize ERROR:", err)
+    }
+  )
 })
-
-
 // -----------------------------
 // PRICING NORMALIZATION / AUDIT HELPERS
 // -----------------------------
