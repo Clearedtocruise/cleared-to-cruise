@@ -1155,37 +1155,56 @@ app.post("/api/admin/pricing", requireAdminLogin, async (req, res) => {
     return res.status(500).json({ error: "Could not save pricing." })
   }
 })
-
-// -----------------------------
+// ------------------------------
 // TESTIMONIAL ROUTES
-// -----------------------------
-app.get("/api/testimonials", async (req, res) => {
+// ------------------------------
+
+app.get("/api/testimonials", async (_req, res) => {
   try {
-    const rows = await allAsync(`
-      SELECT 
+    const rows = await allAsync(
+      `
+      SELECT
         id,
         customerName,
+        customerEmail,
+        rentalLabel,
         testimonialText,
+        photoPath,
         photos,
+        isApproved,
+        isActive,
         createdAt
       FROM testimonials
-      WHERE isApproved = 1
-        AND isActive = 1
-      ORDER BY createdAt DESC
-    `)
+      WHERE isApproved = 1 AND isActive = 1
+      ORDER BY datetime(createdAt) DESC, id DESC
+      `
+    )
 
-    res.json(rows)
+    const normalized = rows.map((row) => ({
+      id: row.id,
+      customerName: row.customerName || "",
+      customerEmail: row.customerEmail || "",
+      rentalLabel: row.rentalLabel || "",
+      testimonialText: row.testimonialText || "",
+      photoPath: row.photoPath || null,
+      photos: row.photos ? JSON.parse(row.photos) : [],
+      isApproved: Number(row.isApproved || 0),
+      isActive: Number(row.isActive || 0),
+      createdAt: row.createdAt || "",
+    }))
+
+    res.json(normalized)
   } catch (err) {
-    console.error("TESTIMONIAL LOAD ERROR:", err)
+    console.error("PUBLIC TESTIMONIALS ERROR:", err)
     res.status(500).json({ error: "Could not load testimonials." })
   }
 })
 
 app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
-  const customerName = String(req.body.customerName || req.body.name || "").trim()
-  const testimonialText = String(req.body.testimonialText || req.body.text || "").trim()
-  const rentalLabel = normalizeRentalLabel(req.body.rentalLabel || "")
-  const customerEmail = normalizeEmail(req.body.customerEmail || "")
+  const customerName = String(req.body.customerName || "").trim()
+  const testimonialText = String(req.body.testimonialText || "").trim()
+  const customerEmail = String(req.body.customerEmail || "").trim()
+  const rentalLabel = String(req.body.rentalLabel || "").trim()
   const createdAt = new Date().toISOString()
 
   if (!customerName || !testimonialText) {
@@ -1194,7 +1213,7 @@ app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
 
   try {
     const files = Array.isArray(req.files) ? req.files : []
-    const photoPaths = files.map((file) => `./uploads/${file.filename}`)
+    const photoPaths = files.map((file) => `/uploads/${file.filename}`)
     const legacyPhotoPath = photoPaths.length > 0 ? photoPaths[0] : null
 
     const result = await runAsync(
@@ -1223,218 +1242,96 @@ app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
       ]
     )
 
-    await sendEmail({
-      to: ADMIN_NOTIFICATION_EMAIL,
-      subject: `New testimonial submission #${result.lastID}`,
-      text: `
-A new testimonial was submitted and is waiting for approval.
-
-Testimonial ID: ${result.lastID}
-Name: ${customerName}
-Rental: ${rentalLabel || "Not provided"}
-Email: ${customerEmail || "Not provided"}
-Photo Count: ${photoPaths.length}
-      `.trim(),
-      html: `
-        <h2>New testimonial submission</h2>
-        <p><strong>Testimonial ID:</strong> ${result.lastID}</p>
-        <p><strong>Name:</strong> ${escapeHtml(customerName)}</p>
-        <p><strong>Rental:</strong> ${escapeHtml(rentalLabel || "Not provided")}</p>
-        <p><strong>Email:</strong> ${escapeHtml(customerEmail || "Not provided")}</p>
-        <p><strong>Photo Count:</strong> ${photoPaths.length}</p>
-        <p>This testimonial is waiting for admin approval.</p>
-      `,
-      attachments: photoPaths
-        .map((p) => bookingPhotoAttachment(p))
-        .flat(),
-    }).catch((err) => {
-      console.error("TESTIMONIAL ADMIN EMAIL ERROR:", err)
+    res.json({
+      success: true,
+      id: result.lastID,
+      message: "Submitted for approval!",
     })
-
-    return res.json({ success: true, id: result.lastID })
   } catch (err) {
-    console.error("CREATE TESTIMONIAL ERROR:", err)
-    return res.status(500).json({ error: "Could not submit testimonial." })
+    console.error("SUBMIT TESTIMONIAL ERROR:", err)
+    res.status(500).json({ error: "Could not submit testimonial." })
   }
 })
 
-app.put("/api/admin/testimonials/:id/approve", async (req, res) => {
-  const id = req.params.id
-
-  try {
-    await runAsync(
-      `UPDATE testimonials SET Approved = 1 WHERE id = ?`,
-      [id]
-    )
-
-    return res.json({ success: true })
-  } catch (err) {
-    console.error("APPROVE TESTIMONIAL ERROR:", err)
-    return res.status(500).json({ error: "Failed to approve testimonial" })
-  }
-})
-
-app.get("/api/admin/testimonials", async (_req, res) => {
+app.get("/api/admin/testimonials", requireAdminLogin, async (_req, res) => {
   try {
     const rows = await allAsync(
       `
-      SELECT id, customerName, customerEmail, rentalLabel, testimonialText, photoPath, photos, isApproved, isActive, createdAt
+      SELECT
+        id,
+        customerName,
+        customerEmail,
+        rentalLabel,
+        testimonialText,
+        photoPath,
+        photos,
+        isApproved,
+        isActive,
+        createdAt
       FROM testimonials
-      ORDER BY id DESC
+      ORDER BY datetime(createdAt) DESC, id DESC
       `
     )
 
-    const formatted = rows.map((row) => {
-      let parsedPhotos = []
+    const normalized = rows.map((row) => ({
+      id: row.id,
+      customerName: row.customerName || "",
+      customerEmail: row.customerEmail || "",
+      rentalLabel: row.rentalLabel || "",
+      testimonialText: row.testimonialText || "",
+      photoPath: row.photoPath || null,
+      photos: row.photos ? JSON.parse(row.photos) : [],
+      isApproved: Number(row.isApproved || 0),
+      isActive: Number(row.isActive || 0),
+      createdAt: row.createdAt || "",
+    }))
 
-      try {
-        parsedPhotos = row.photos ? JSON.parse(row.photos) : []
-      } catch {
-        parsedPhotos = []
-      }
-
-      const normalizedPhotos = Array.isArray(parsedPhotos)
-        ? parsedPhotos.map((p) => buildUploadsUrl(p))
-        : []
-
-      return {
-        ...row,
-        photoUrl: row.photoPath ? buildUploadsUrl(row.photoPath) : "",
-        photos: normalizedPhotos,
-      }
-    })
-
-    return res.json(formatted)
+    res.json(normalized)
   } catch (err) {
     console.error("ADMIN TESTIMONIALS ERROR:", err)
-    return res.status(500).json({ error: "Could not load testimonials." })
+    res.status(500).json({ error: "Could not load admin testimonials." })
+  }
+})
+
+app.post("/api/admin/testimonials/:id/approve", requireAdminLogin, async (req, res) => {
+
+app.post("/api/admin/testimonials/:id/approve", requireAdminLogin, async (req, res) => {
+  try {
+    console.log("APPROVING TESTIMONIAL:", req.params.id)
+
+    await runAsync(
+      `UPDATE testimonials SET isApproved = 1 WHERE id = ?`,
+      [req.params.id]
+    )
+
+    res.json({ success: true })
+  } catch (err) {
+    console.error("APPROVE ERROR:", err)
+    res.status(500).json({ error: "Could not approve testimonial." })
   }
 })
 
 app.post("/api/admin/testimonials/:id/deny", requireAdminLogin, async (req, res) => {
+  const { id } = req.params
+
   try {
     const result = await runAsync(
       `
       UPDATE testimonials
-          Approved = 0
+      SET isActive = 0
       WHERE id = ?
       `,
-      [req.params.id]
-    )
-
-    if (result.changes === 0) {
-      return res.status(404).json({ error: "Testimonial not found." })
-    }
-
-    return res.json({ success: true, message: "Testimonial removed." })
-  } catch (err) {
-    console.error("DENY TESTIMONIAL ERROR:", err)
-    return res.status(500).json({ error: "Could not remove testimonial." })
-  }
-})
-
-app.put("/api/admin/testimonials/:id/approve", async (req, res) => {
-  const id = req.params.id
-
-  try {
-    await runAsync(
-      `UPDATE testimonials SET Approved = 1 WHERE id = ?`,
       [id]
     )
 
-    return res.json({ success: true })
-  } catch (err) {
-    console.error("APPROVE TESTIMONIAL ERROR:", err)
-    return res.status(500).json({ error: "Failed to approve testimonial" })
-  }
-})
-
-app.get("/api/admin/testimonials", async (_req, res) => {
-  try {
-    const rows = await allAsync(
-      `
-      SELECT id, customerName, rentalLabel, testimonialText, photoPath, photoPaths, Approved, isActive, createdAt
-      FROM testimonials
-      ORDER BY id DESC
-      `
-    )
-
-    const formatted = rows.map((row) => {
-      let parsedPhotos = []
-
-      try {
-        parsedPhotos = row.photoPaths ? JSON.parse(row.photoPaths) : []
-      } catch {
-        parsedPhotos = []
-      }
-
-      const normalizedPhotos = Array.isArray(parsedPhotos)
-        ? parsedPhotos.map((p) => buildUploadsUrl(p))
-        : []
-
-      return {
-        ...row,
-        photoUrl: row.photoPath ? buildUploadsUrl(row.photoPath) : "",
-        photos: normalizedPhotos,
-      }
-    })
-
-    return res.json(formatted)
-  } catch (err) {
-    console.error("ADMIN TESTIMONIALS ERROR:", err)
-    return res.status(500).json({ error: "Could not load testimonials." })
-  }
-})
-app.post("/api/testimonials", upload.array("photos", 5), (req, res) => {
-  try {
-    const { name, text } = req.body
-
-    if (!name || !text) {
-      return res.status(400).json({ error: "Name and text required" })
-    }
-
-    // 🔥 Handle multiple photos
-    const photoPaths = req.files ? req.files.map(file => file.path) : []
-
-    const stmt = db.prepare(`
-      INSERT INTO testimonials (name, text, photos, approved)
-      VALUES (?, ?, ?, 0)
-    `)
-
-    stmt.run(name, text, JSON.stringify(photoPaths), function (err) {
-      if (err) {
-        console.error(err)
-        return res.status(500).json({ error: "Failed to save testimonial" })
-      }
-
-      res.json({ success: true })
-    })
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: "Server error" })
-  }
-})
-
-app.post("/api/admin/testimonials/:id/deny", requireAdminLogin, async (req, res) => {
-  try {
-    const result = await runAsync(
-      `
-      UPDATE testimonials
-      SET isActive = 0,
-          Approved = 0
-      WHERE id = ?
-      `,
-      [req.params.id]
-    )
-
-    if (result.changes === 0) {
+    if (!result.changes) {
       return res.status(404).json({ error: "Testimonial not found." })
     }
 
-    return res.json({ success: true, message: "Testimonial removed." })
+    res.json({ success: true })
   } catch (err) {
     console.error("DENY TESTIMONIAL ERROR:", err)
-    return res.status(500).json({ error: "Could not remove testimonial." })
+    res.status(500).json({ error: "Could not deny testimonial." })
   }
 })
 
