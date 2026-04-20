@@ -942,15 +942,12 @@ db.serialize(() => {
 db.run(`
   CREATE TABLE IF NOT EXISTS testimonials (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    customerName TEXT NOT NULL,
-    customerEmail TEXT,
-    rentalLabel TEXT,
-    testimonialText TEXT NOT NULL,
-    photoPath TEXT,
-    photos TEXT,
-    isApproved INTEGER NOT NULL DEFAULT 0,
-    isActive INTEGER NOT NULL DEFAULT 1,
-    createdAt TEXT NOT NULL
+    fullName TEXT NOT NULL,
+    message TEXT NOT NULL,
+    rating INTEGER NOT NULL DEFAULT 5,
+    approved INTEGER NOT NULL DEFAULT 0,
+    createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+    photos TEXT NOT NULL DEFAULT '[]'
   )
 `)
 
