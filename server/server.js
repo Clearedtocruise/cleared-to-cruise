@@ -1163,30 +1163,48 @@ app.post("/api/admin/pricing", requireAdminLogin, async (req, res) => {
 app.get("/api/testimonials", async (_req, res) => {
   try {
     const rows = await allAsync(`
-      SELECT id, fullName, message, rating, approved, photos, createdAt
+      SELECT *
       FROM testimonials
-      WHERE approved = 1
+      WHERE COALESCE(approved, isApproved, 0) = 1
       ORDER BY id DESC
     `)
 
-    const normalized = rows.map((t) => ({
-      id: t.id,
-      name: t.fullName,
-      message: t.message,
-      rating: t.rating || 5,
-      photos: t.photos ? JSON.parse(t.photos) : [],
-      createdAt: t.createdAt,
-    }))
+    const normalized = rows.map((row) => {
+      let photos = []
+
+      try {
+        if (row.photos) {
+          photos = JSON.parse(row.photos)
+          if (!Array.isArray(photos)) photos = []
+        }
+      } catch {
+        photos = []
+      }
+
+      return {
+        id: row.id,
+        fullName: row.fullName || row.customerName || row.name || "",
+        message: row.message || row.testimonialText || row.text || "",
+        rating: Number(row.rating || 5),
+        approved: Number(
+          row.approved ??
+          row.isApproved ??
+          0
+        ),
+        createdAt: row.createdAt || "",
+        photos,
+      }
+    })
 
     res.json(normalized)
   } catch (err) {
-  console.error("PUBLIC TESTIMONIALS ERROR:", err)
-  res.status(500).json({
-    error: "Failed to load testimonials",
-    details: err.message,
-    stack: err.stack
-  })
-}
+    console.error("PUBLIC TESTIMONIALS ERROR:", err)
+    res.status(500).json({
+      error: "Failed to load testimonials",
+      details: err.message,
+    })
+  }
+})
 
 // Submit testimonial
 app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
