@@ -525,11 +525,11 @@ const res = await fetch(`${API}/api/testimonials`, {
   headers: {
     "Content-Type": "application/json",
   },
-  body: JSON.stringify({
-    fullName: testimonialName.trim(),
-    message: testimonialText.trim(),
-    rating: 5,
-  }),
+body: JSON.stringify({
+  fullName: testimonialName.trim(),
+  message: testimonialText.trim(),
+  rating: testimonialRating
+}),
 })
 
     const data = await res.json().catch(() => ({}))
@@ -617,6 +617,26 @@ const res = await fetch(`${API}/api/testimonials`, {
               placeholder="Write your experience..."
             />
           </label>
+
+          <label style={styles.labelFull}>
+  Rating
+  <div style={styles.starPickerRow}>
+    {[1, 2, 3, 4, 5].map((star) => (
+      <button
+        key={star}
+        type="button"
+        onClick={() => setTestimonialRating(star)}
+        style={{
+          ...styles.starButton,
+          ...(star <= testimonialRating ? styles.starButtonActive : {}),
+        }}
+        aria-label={`Rate ${star} star${star === 1 ? "" : "s"}`}
+      >
+        ★
+      </button>
+    ))}
+  </div>
+</label>
 
           <label style={styles.labelFull}>
             Upload Photo (optional)
