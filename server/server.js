@@ -3582,6 +3582,18 @@ app.get("/debug/testimonials", async (req, res) => {
     res.json({ error: err.message })
   }
 })
+app.get("/debug/add-testimonial", async (req, res) => {
+  try {
+    await runAsync(`
+      INSERT INTO testimonials (fullName, message, rating, approved)
+      VALUES ('Tim Test', 'This is a live testimonial', 5, 1)
+    `)
+
+    res.send("Inserted")
+  } catch (err) {
+    res.json({ error: err.message })
+  }
+})
 // -----------------------------
 // START
 // -----------------------------
