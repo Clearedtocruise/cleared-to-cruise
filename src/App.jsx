@@ -516,47 +516,48 @@ function TestimonialsSection({ testimonials = [], onSubmitted }) {
   }
 
   async function submitTestimonial(e) {
-    e.preventDefault()
-    setTestimonialStatus("")
+  e.preventDefault()
+  setTestimonialStatus("")
 
-    if (!testimonialName.trim() || !testimonialText.trim()) {
-      setTestimonialStatus("Please enter your name and testimonial.")
-      return
-    }
-
-    setTestimonialLoading(true)
-
-    try {
-      const formData = new FormData()
-      formData.append("customerName", testimonialName.trim())
-      formData.append("testimonialText", testimonialText.trim())
-
-testimonialPhotos.forEach((file) => {
-  formData.append("photos", file)
-})
-
-      const res = await fetch(`${API}/api/testimonials`, {
-        method: "POST",
-        body: formData,
-      })
-
-if (!res.ok) {
-  const err = await res.json().catch(() => ({}))
-  throw new Error(err.error || "Failed to submit")
-}
-
-
-      setTestimonialStatus("Submitted for approval!")
-      setTestimonialName("")
-      setTestimonialText("")
-      setTestimonialPhotos([])
-} catch (err) {
-  setTestimonialStatus(err.message)
-}
-     finally {
-      setTestimonialLoading(false)
-    }
+  if (!testimonialName.trim() || !testimonialText.trim()) {
+    setTestimonialStatus("Please enter your name and testimonial.")
+    return
   }
+
+  setTestimonialLoading(true)
+
+  try {
+    const formData = new FormData()
+    formData.append("fullName", testimonialName.trim())
+    formData.append("message", testimonialText.trim())
+    formData.append("rating", String(testimonialRating || 5))
+
+    testimonialPhotos.forEach((file) => {
+      formData.append("photos", file)
+    })
+
+    const res = await fetch(`${API}/api/testimonials`, {
+      method: "POST",
+      body: formData,
+    })
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to submit testimonial.")
+    }
+
+    setTestimonialStatus("Submitted for approval!")
+    setTestimonialName("")
+    setTestimonialText("")
+    setTestimonialPhotos([])
+    setTestimonialRating(5)
+  } catch (err) {
+    setTestimonialStatus(err.message || "Error submitting testimonial.")
+  } finally {
+    setTestimonialLoading(false)
+  }
+}
 
   return (
     <section style={styles.mainCard}>

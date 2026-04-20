@@ -1159,24 +1159,24 @@ app.post("/api/admin/pricing", requireAdminLogin, async (req, res) => {
 // TESTIMONIAL ROUTES
 // ===============================
 
-// Public testimonials (only approved + active)
+// Public testimonials
 app.get("/api/testimonials", async (_req, res) => {
   try {
-    const rows = await allAsync(
-      `SELECT * FROM testimonials WHERE isApproved = 1 AND isActive = 1 ORDER BY createdAt DESC`
-    )
+    const rows = await allAsync(`
+      SELECT id, fullName, rating, message, approved, createdAt, photos
+      FROM testimonials
+      WHERE approved = 1
+      ORDER BY datetime(createdAt) DESC, id DESC
+    `)
 
-    const normalized = rows.map(row => ({
+    const normalized = rows.map((row) => ({
       id: row.id,
-      customerName: row.customerName,
-      customerEmail: row.customerEmail || "",
-      rentalLabel: row.rentalLabel || "",
-      testimonialText: row.testimonialText,
-      photoPath: row.photoPath || null,
+      fullName: row.fullName || "",
+      rating: Number(row.rating || 5),
+      message: row.message || "",
+      approved: Number(row.approved || 0),
+      createdAt: row.createdAt || "",
       photos: row.photos ? JSON.parse(row.photos) : [],
-      isApproved: Number(row.isApproved || 0),
-      isActive: Number(row.isActive || 0),
-      createdAt: row.createdAt || ""
     }))
 
     res.json(normalized)
@@ -1186,64 +1186,70 @@ app.get("/api/testimonials", async (_req, res) => {
   }
 })
 
-
 // Submit testimonial
 app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
-  const customerName = String(req.body.customerName || "").trim()
-  const testimonialText = String(req.body.testimonialText || "").trim()
-  const rentalLabel = String(req.body.rentalLabel || "").trim()
-  const customerEmail = String(req.body.customerEmail || "").trim()
+  const fullName = String(req.body.fullName || req.body.customerName || req.body.name || "").trim()
+  const message = String(req.body.message || req.body.testimonialText || req.body.text || "").trim()
+  const rating = Number(req.body.rating || 5)
   const createdAt = new Date().toISOString()
 
-  if (!customerName || !testimonialText) {
+  if (!fullName || !message) {
     return res.status(400).json({ error: "Name and testimonial text are required." })
   }
 
   try {
     const files = Array.isArray(req.files) ? req.files : []
-    const photoPaths = files.map(file => `/uploads/${file.filename}`)
-    const primaryPhoto = photoPaths.length > 0 ? photoPaths[0] : null
+    const photoPaths = files.map((file) => `/uploads/${file.filename}`)
 
-    await runAsync(
-      `INSERT INTO testimonials 
-      (customerName, customerEmail, rentalLabel, testimonialText, photoPath, photos, isApproved, isActive, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?)`,
+    const result = await runAsync(
+      `
+      INSERT INTO testimonials (
+        fullName,
+        rating,
+        message,
+        approved,
+        createdAt,
+        photos
+      )
+      VALUES (?, ?, ?, 0, ?, ?)
+      `,
       [
-        customerName,
-        customerEmail,
-        rentalLabel,
-        testimonialText,
-        primaryPhoto,
+        fullName,
+        rating,
+        message,
+        createdAt,
         JSON.stringify(photoPaths),
-        createdAt
       ]
     )
 
-    console.log("NEW TESTIMONIAL SUBMITTED:", customerName)
-
-    res.json({ success: true })
+    res.json({
+      success: true,
+      id: result.lastID,
+      message: "Submitted for approval!",
+    })
   } catch (err) {
     console.error("SUBMIT TESTIMONIAL ERROR:", err)
-    res.status(500).json({ error: "Failed to submit testimonial." })
+    res.status(500).json({ error: "Could not submit testimonial." })
   }
 })
 
-
-// Admin - get ALL testimonials
+// Admin testimonials list
 app.get("/api/admin/testimonials", requireAdminLogin, async (_req, res) => {
   try {
-    const rows = await allAsync(
-      `SELECT * FROM testimonials ORDER BY createdAt DESC`
-    )
+    const rows = await allAsync(`
+      SELECT id, fullName, rating, message, approved, createdAt, photos
+      FROM testimonials
+      ORDER BY datetime(createdAt) DESC, id DESC
+    `)
 
-    const normalized = rows.map(row => ({
+    const normalized = rows.map((row) => ({
       id: row.id,
-      customerName: row.customerName,
-      testimonialText: row.testimonialText,
-      photoPath: row.photoPath || null,
-      isApproved: Number(row.isApproved || 0),
-      isActive: Number(row.isActive || 0),
-      createdAt: row.createdAt || ""
+      fullName: row.fullName || "",
+      rating: Number(row.rating || 5),
+      message: row.message || "",
+      approved: Number(row.approved || 0),
+      createdAt: row.createdAt || "",
+      photos: row.photos ? JSON.parse(row.photos) : [],
     }))
 
     res.json(normalized)
@@ -1253,14 +1259,11 @@ app.get("/api/admin/testimonials", requireAdminLogin, async (_req, res) => {
   }
 })
 
-
 // Approve testimonial
 app.post("/api/admin/testimonials/:id/approve", requireAdminLogin, async (req, res) => {
   try {
-    console.log("APPROVING TESTIMONIAL:", req.params.id)
-
     const result = await runAsync(
-      `UPDATE testimonials SET isApproved = 1 WHERE id = ?`,
+      `UPDATE testimonials SET approved = 1 WHERE id = ?`,
       [req.params.id]
     )
 
@@ -1270,18 +1273,16 @@ app.post("/api/admin/testimonials/:id/approve", requireAdminLogin, async (req, r
 
     res.json({ success: true })
   } catch (err) {
-    console.error("APPROVE ERROR:", err)
+    console.error("APPROVE TESTIMONIAL ERROR:", err)
     res.status(500).json({ error: "Could not approve testimonial." })
   }
 })
 
-// Deny testimonial (soft delete)
+// Deny testimonial
 app.post("/api/admin/testimonials/:id/deny", requireAdminLogin, async (req, res) => {
   try {
-    console.log("DENYING TESTIMONIAL:", req.params.id)
-
     const result = await runAsync(
-      `UPDATE testimonials SET isActive = 0 WHERE id = ?`,
+      `DELETE FROM testimonials WHERE id = ?`,
       [req.params.id]
     )
 
@@ -1291,7 +1292,7 @@ app.post("/api/admin/testimonials/:id/deny", requireAdminLogin, async (req, res)
 
     res.json({ success: true })
   } catch (err) {
-    console.error("DENY ERROR:", err)
+    console.error("DENY TESTIMONIAL ERROR:", err)
     res.status(500).json({ error: "Could not deny testimonial." })
   }
 })
