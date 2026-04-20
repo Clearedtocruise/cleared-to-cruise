@@ -1196,49 +1196,45 @@ app.get("/api/testimonials", async (_req, res) => {
 })
 
 // Submit testimonial
-app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
-  const fullName = String(req.body.fullName || req.body.customerName || req.body.name || "").trim()
-  const message = String(req.body.message || req.body.testimonialText || req.body.text || "").trim()
-  const rating = Number(req.body.rating || 5)
-  const createdAt = new Date().toISOString()
-
-  if (!fullName || !message) {
-    return res.status(400).json({ error: "Name and testimonial text are required." })
-  }
-
+app.post("/api/testimonials", express.json(), async (req, res) => {
   try {
-    const files = Array.isArray(req.files) ? req.files : []
-    const photoPaths = files.map((file) => `/uploads/${file.filename}`)
+    const fullName = String(
+      req.body.fullName || req.body.customerName || req.body.name || ""
+    ).trim()
+
+    const message = String(
+      req.body.message || req.body.testimonialText || req.body.text || ""
+    ).trim()
+
+    const rating = Math.max(1, Math.min(5, Number(req.body.rating || 5) || 5))
+
+    if (!fullName || !message) {
+      return res.status(400).json({ error: "Name and testimonial text are required." })
+    }
 
     const result = await runAsync(
       `
       INSERT INTO testimonials (
         fullName,
-        rating,
         message,
+        rating,
         approved,
         createdAt,
         photos
       )
-      VALUES (?, ?, ?, 0, ?, ?)
+      VALUES (?, ?, ?, 0, datetime('now'), '[]')
       `,
-      [
-        fullName,
-        rating,
-        message,
-        createdAt,
-        JSON.stringify(photoPaths),
-      ]
+      [fullName, message, rating]
     )
 
-    res.json({
+    return res.json({
       success: true,
       id: result.lastID,
       message: "Submitted for approval!",
     })
   } catch (err) {
     console.error("SUBMIT TESTIMONIAL ERROR:", err)
-    res.status(500).json({ error: "Could not submit testimonial." })
+    return res.status(500).json({ error: "Could not submit testimonial." })
   }
 })
 
