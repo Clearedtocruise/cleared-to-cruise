@@ -1155,42 +1155,28 @@ app.post("/api/admin/pricing", requireAdminLogin, async (req, res) => {
     return res.status(500).json({ error: "Could not save pricing." })
   }
 })
-// ------------------------------
+// ===============================
 // TESTIMONIAL ROUTES
-// ------------------------------
+// ===============================
 
+// Public testimonials (only approved + active)
 app.get("/api/testimonials", async (_req, res) => {
   try {
     const rows = await allAsync(
-      `
-      SELECT
-        id,
-        customerName,
-        customerEmail,
-        rentalLabel,
-        testimonialText,
-        photoPath,
-        photos,
-        isApproved,
-        isActive,
-        createdAt
-      FROM testimonials
-      WHERE isApproved = 1 AND isActive = 1
-      ORDER BY datetime(createdAt) DESC, id DESC
-      `
+      `SELECT * FROM testimonials WHERE isApproved = 1 AND isActive = 1 ORDER BY createdAt DESC`
     )
 
-    const normalized = rows.map((row) => ({
+    const normalized = rows.map(row => ({
       id: row.id,
-      customerName: row.customerName || "",
+      customerName: row.customerName,
       customerEmail: row.customerEmail || "",
       rentalLabel: row.rentalLabel || "",
-      testimonialText: row.testimonialText || "",
+      testimonialText: row.testimonialText,
       photoPath: row.photoPath || null,
       photos: row.photos ? JSON.parse(row.photos) : [],
       isApproved: Number(row.isApproved || 0),
       isActive: Number(row.isActive || 0),
-      createdAt: row.createdAt || "",
+      createdAt: row.createdAt || ""
     }))
 
     res.json(normalized)
@@ -1200,11 +1186,13 @@ app.get("/api/testimonials", async (_req, res) => {
   }
 })
 
+
+// Submit testimonial
 app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
   const customerName = String(req.body.customerName || "").trim()
   const testimonialText = String(req.body.testimonialText || "").trim()
-  const customerEmail = String(req.body.customerEmail || "").trim()
   const rentalLabel = String(req.body.rentalLabel || "").trim()
+  const customerEmail = String(req.body.customerEmail || "").trim()
   const createdAt = new Date().toISOString()
 
   if (!customerName || !testimonialText) {
@@ -1213,77 +1201,49 @@ app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
 
   try {
     const files = Array.isArray(req.files) ? req.files : []
-    const photoPaths = files.map((file) => `/uploads/${file.filename}`)
-    const legacyPhotoPath = photoPaths.length > 0 ? photoPaths[0] : null
+    const photoPaths = files.map(file => `/uploads/${file.filename}`)
+    const primaryPhoto = photoPaths.length > 0 ? photoPaths[0] : null
 
-    const result = await runAsync(
-      `
-      INSERT INTO testimonials (
+    await runAsync(
+      `INSERT INTO testimonials 
+      (customerName, customerEmail, rentalLabel, testimonialText, photoPath, photos, isApproved, isActive, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?)`,
+      [
         customerName,
         customerEmail,
         rentalLabel,
         testimonialText,
-        photoPath,
-        photos,
-        isApproved,
-        isActive,
-        createdAt
-      )
-      VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?)
-      `,
-      [
-        customerName,
-        customerEmail || null,
-        rentalLabel || null,
-        testimonialText,
-        legacyPhotoPath,
+        primaryPhoto,
         JSON.stringify(photoPaths),
-        createdAt,
+        createdAt
       ]
     )
 
-    res.json({
-      success: true,
-      id: result.lastID,
-      message: "Submitted for approval!",
-    })
+    console.log("NEW TESTIMONIAL SUBMITTED:", customerName)
+
+    res.json({ success: true })
   } catch (err) {
     console.error("SUBMIT TESTIMONIAL ERROR:", err)
-    res.status(500).json({ error: "Could not submit testimonial." })
+    res.status(500).json({ error: "Failed to submit testimonial." })
   }
 })
 
+
+// Admin - get ALL testimonials
 app.get("/api/admin/testimonials", requireAdminLogin, async (_req, res) => {
   try {
     const rows = await allAsync(
-      `
-      SELECT
-        id,
-        customerName,
-        customerEmail,
-        rentalLabel,
-        testimonialText,
-        photoPath,
-        photos,
-        isApproved,
-        isActive,
-        createdAt
-      FROM testimonials
-      ORDER BY datetime(createdAt) DESC, id DESC
-      `
+      `SELECT * FROM testimonials ORDER BY createdAt DESC`
     )
 
-    const normalized = rows.map((row) => ({
+    const normalized = rows.map(row => ({
       id: row.id,
-      customerName: row.customerName || "",
-      customerEmail: row.customerEmail || "",
-      rentalLabel: row.rentalLabel || "",
-      testimonialText: row.testimonialText || "",
+      customerName: row.customerName,
+      testimonialText: row.testimonialText,
       photoPath: row.photoPath || null,
-      photos: row.photos ? JSON.parse(row.photos) : [],
       isApproved: Number(row.isApproved || 0),
       isActive: Number(row.isActive || 0),
-      createdAt: row.createdAt || "",
+      createdAt: row.createdAt || ""
     }))
 
     res.json(normalized)
@@ -1293,35 +1253,15 @@ app.get("/api/admin/testimonials", requireAdminLogin, async (_req, res) => {
   }
 })
 
-app.post("/api/admin/testimonials/:id/approve", requireAdminLogin, async (req, res) => {
 
+// Approve testimonial
 app.post("/api/admin/testimonials/:id/approve", requireAdminLogin, async (req, res) => {
   try {
     console.log("APPROVING TESTIMONIAL:", req.params.id)
 
-    await runAsync(
+    const result = await runAsync(
       `UPDATE testimonials SET isApproved = 1 WHERE id = ?`,
       [req.params.id]
-    )
-
-    res.json({ success: true })
-  } catch (err) {
-    console.error("APPROVE ERROR:", err)
-    res.status(500).json({ error: "Could not approve testimonial." })
-  }
-})
-
-app.post("/api/admin/testimonials/:id/deny", requireAdminLogin, async (req, res) => {
-  const { id } = req.params
-
-  try {
-    const result = await runAsync(
-      `
-      UPDATE testimonials
-      SET isActive = 0
-      WHERE id = ?
-      `,
-      [id]
     )
 
     if (!result.changes) {
@@ -1330,7 +1270,28 @@ app.post("/api/admin/testimonials/:id/deny", requireAdminLogin, async (req, res)
 
     res.json({ success: true })
   } catch (err) {
-    console.error("DENY TESTIMONIAL ERROR:", err)
+    console.error("APPROVE ERROR:", err)
+    res.status(500).json({ error: "Could not approve testimonial." })
+  }
+})
+
+// Deny testimonial (soft delete)
+app.post("/api/admin/testimonials/:id/deny", requireAdminLogin, async (req, res) => {
+  try {
+    console.log("DENYING TESTIMONIAL:", req.params.id)
+
+    const result = await runAsync(
+      `UPDATE testimonials SET isActive = 0 WHERE id = ?`,
+      [req.params.id]
+    )
+
+    if (!result.changes) {
+      return res.status(404).json({ error: "Testimonial not found." })
+    }
+
+    res.json({ success: true })
+  } catch (err) {
+    console.error("DENY ERROR:", err)
     res.status(500).json({ error: "Could not deny testimonial." })
   }
 })
@@ -1516,6 +1477,7 @@ app.get("/api/calendar-unavailable", async (req, res) => {
     return res.status(500).json({ error: "Could not load unavailable dates." })
   }
 })
+
 // -----------------------------
 // BOOKING LOOKUP
 // -----------------------------
