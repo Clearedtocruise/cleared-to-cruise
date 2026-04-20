@@ -566,7 +566,13 @@ body: JSON.stringify({
     <button
       type="button"
       onClick={prevTestimonial}
-      style={styles.testimonialArrow}
+style={{
+  ...styles.testimonialArrow,
+  position: "absolute",
+  left: "-40px",
+  top: "50%",
+  transform: "translateY(-50%)"
+}}
     >
       {"<"}
     </button>
@@ -586,13 +592,7 @@ body: JSON.stringify({
     <button
       type="button"
       onClick={nextTestimonial}
-      style={{
-  ...styles.testimonialArrow,
-  position: "absolute",
-  right: "-40px",
-  top: "50%",
-  transform: "translateY(-50%)"
-}}
+      style={styles.testimonialArrow}
     >
       {">"}
     </button>
