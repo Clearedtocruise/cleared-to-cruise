@@ -500,6 +500,7 @@ function TestimonialsSection({ testimonials = [], onSubmitted }) {
  const [testimonialPhotos, setTestimonialPhotos] = useState([])
   const [testimonialLoading, setTestimonialLoading] = useState(false)
   const [testimonialStatus, setTestimonialStatus] = useState("")
+  const [testimonialRating, setTestimonialRating] = useState(5)
 
   const [activeTestimonialIndex, setActiveTestimonialIndex] = useState(0)
 
@@ -530,7 +531,7 @@ function TestimonialsSection({ testimonials = [], onSubmitted }) {
     const formData = new FormData()
     formData.append("fullName", testimonialName.trim())
     formData.append("message", testimonialText.trim())
-    formData.append("rating", String(testimonialRating || 5))
+    formData.append("rating", "5")
 
     testimonialPhotos.forEach((file) => {
       formData.append("photos", file)
@@ -2446,11 +2447,11 @@ function AdminPage() {
                   {adminTestimonials.map((item) => (
                     <tr key={item.id}>
                       <td style={styles.adminTd}>
-                        <div>{item.customerName || "—"}</div>
+                        <div>{item.fullName || "—"}</div>
                         <div style={styles.lookupMeta}>{item.customerEmail || "—"}</div>
                       </td>
                       <td style={styles.adminTd}>{item.rentalLabel || "—"}</td>
-                      <td style={styles.adminTd}>{item.testimonialText || "—"}</td>
+                      <td style={styles.adminTd}>{item.message || "—"}</td>
                       <td style={styles.adminTd}>
                         {item.photoUrl ? (
                           <img
@@ -2463,7 +2464,7 @@ function AdminPage() {
                         )}
                       </td>
                       <td style={styles.adminTd}>
-                        <span style={statusPillStyle(item.isApproved ? "confirmed" : "pending_approval")}>
+                        <span style={statusPillStyle(item.Approved ? "confirmed" : "pending_approval")}>
                           {item.isApproved ? "approved" : "pending"}
                         </span>
                       </td>

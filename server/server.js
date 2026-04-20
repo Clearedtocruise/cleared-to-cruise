@@ -3582,28 +3582,6 @@ app.get("/debug/testimonials", async (req, res) => {
     res.json({ error: err.message })
   }
 })
-app.get("/fix-testimonials", async (req, res) => {
-  try {
-    await runAsync(`DROP TABLE IF EXISTS testimonials`)
-
-    await runAsync(`
-      CREATE TABLE testimonials (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fullName TEXT,
-        message TEXT,
-        rating INTEGER,
-        approved INTEGER DEFAULT 0,
-        createdAt TEXT,
-        photos TEXT
-      )
-    `)
-
-    res.send("fixed")
-  } catch (err) {
-    res.json({ error: err.message })
-  }
-})
-
 // -----------------------------
 // START
 // -----------------------------
