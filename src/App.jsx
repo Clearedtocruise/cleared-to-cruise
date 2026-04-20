@@ -589,13 +589,19 @@ style={{
       </div>
     </div>
 
-    <button
-      type="button"
-      onClick={nextTestimonial}
-      style={styles.testimonialArrow}
-    >
-      {">"}
-    </button>
+<button
+  type="button"
+  onClick={nextTestimonial}
+  style={{
+    ...styles.testimonialArrow,
+    position: "absolute",
+    right: "-18px",
+    top: "50%",
+    transform: "translateY(-50%)"
+  }}
+>
+  {">"}
+</button>
   </div>
 ) : (
   <div style={styles.infoBox}>No approved testimonials yet.</div>
