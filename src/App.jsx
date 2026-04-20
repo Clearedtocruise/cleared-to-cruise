@@ -344,15 +344,10 @@ async function fetchPublicPricing() {
 async function fetchPublicTestimonials() {
   try {
     const res = await fetch(`${API}/api/testimonials`)
-    const data = await res.json().catch(() => [])
-
-    if (!res.ok) {
-      return []
-    }
-
-    return Array.isArray(data) ? data : []
-  } catch (error) {
-    console.error("Testimonials load failed:", error)
+    const data = await res.json()
+    return data
+  } catch (err) {
+    console.error("Failed to load testimonials", err)
     return []
   }
 }
@@ -371,11 +366,8 @@ async function adminFetch(path, options = {}) {
   const response = await fetch(`${API}${path}`, {
     ...options,
     headers,
+    credentials: "include",
   })
-
-  if (response.status === 401 || response.status === 403) {
-    throw new Error("ADMIN_AUTH_REQUIRED")
-  }
 
   return response
 }
