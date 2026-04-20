@@ -3594,6 +3594,28 @@ app.get("/debug/add-testimonial", async (req, res) => {
     res.json({ error: err.message })
   }
 })
+app.get("/debug/reset-testimonials", async (req, res) => {
+  try {
+    await runAsync(`DROP TABLE IF EXISTS testimonials`)
+
+    await runAsync(`
+      CREATE TABLE testimonials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fullName TEXT,
+        message TEXT,
+        rating INTEGER,
+        approved INTEGER DEFAULT 0,
+        createdAt TEXT,
+        photos TEXT
+      )
+    `)
+
+    res.send("reset complete")
+  } catch (err) {
+    res.json({ error: err.message })
+  }
+})
+
 // -----------------------------
 // START
 // -----------------------------
