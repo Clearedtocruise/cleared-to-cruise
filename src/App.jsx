@@ -3565,7 +3565,7 @@ setShowWaiver(true)
 
 <TestimonialsSection
   testimonials={testimonials}
-  onSubmitted={loadTestimonials}
+  onSubmitted={refreshTestimonials}
 />
 
       <BookingLookupCard onLoadBooking={loadExistingBookingIntoForm} />
