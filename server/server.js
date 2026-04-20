@@ -3825,17 +3825,40 @@ db.serialize(() => {
     CREATE TABLE IF NOT EXISTS testimonials (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       bookingId INTEGER,
-      name TEXT,
+      fullName TEXT,
       email TEXT,
       message TEXT,
       photos TEXT,
       rating INTEGER,
-      status TEXT DEFAULT 'pending',
+      approved INTEGER DEFAULT 0,
       createdAt TEXT DEFAULT (datetime('now')),
       approvedAt TEXT
     )
   `)
 })
+db.serialize(() => {
+  db.all(`PRAGMA table_info(testimonials)`, [], (err, rows) => {
+    if (err) {
+      console.error("TESTIMONIALS PRAGMA ERROR:", err)
+      return
+    }
+
+    const cols = new Set(rows.map((r) => r.name))
+
+    if (cols.has("name") && !cols.has("fullName")) {
+      db.run(`ALTER TABLE testimonials RENAME COLUMN name TO fullName`, [], (renameErr) => {
+        if (renameErr) console.error("RENAME name TO fullName ERROR:", renameErr)
+      })
+    }
+
+    if (!cols.has("approved")) {
+      db.run(`ALTER TABLE testimonials ADD COLUMN approved INTEGER DEFAULT 0`, [], (alterErr) => {
+        if (alterErr) console.error("ADD approved COLUMN ERROR:", alterErr)
+      })
+    }
+  })
+})
+
 
 // -----------------------------
 // PRICING NORMALIZATION / AUDIT HELPERS
