@@ -1198,6 +1198,8 @@ app.get("/api/testimonials", async (_req, res) => {
 // Submit testimonial
 app.post("/api/testimonials", express.json(), async (req, res) => {
   try {
+    console.log("TESTIMONIAL BODY:", req.body)
+
     const fullName = String(
       req.body.fullName || req.body.customerName || req.body.name || ""
     ).trim()
@@ -1234,7 +1236,9 @@ app.post("/api/testimonials", express.json(), async (req, res) => {
     })
   } catch (err) {
     console.error("SUBMIT TESTIMONIAL ERROR:", err)
-    return res.status(500).json({ error: "Could not submit testimonial." })
+    return res.status(500).json({
+      error: err.message || "Could not submit testimonial.",
+    })
   }
 })
 
