@@ -1196,7 +1196,16 @@ app.get("/api/testimonials", async (_req, res) => {
           photos,
         }
       })
-      .filter((row) => row.approved === 1)
+.filter((row) => {
+  const val =
+    row.approved ??
+    row.isApproved ??
+    row.is_approved ??
+    row.active ??
+    1   // ← TEMP FORCE SHOW
+
+  return Number(val) === 1
+})
 
     res.json(normalized)
   } catch (err) {
