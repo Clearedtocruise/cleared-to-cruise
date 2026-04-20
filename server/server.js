@@ -3615,6 +3615,15 @@ app.get("/debug/reset-testimonials", async (req, res) => {
     res.json({ error: err.message })
   }
 })
+app.get("/debug/delete-testimonials", async (req, res) => {
+  try {
+    await runAsync(`DELETE FROM testimonials`)
+    res.send("all testimonials deleted")
+  } catch (err) {
+    res.json({ error: err.message })
+  }
+})
+
 
 // -----------------------------
 // START
