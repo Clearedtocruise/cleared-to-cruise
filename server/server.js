@@ -1163,26 +1163,25 @@ app.post("/api/admin/pricing", requireAdminLogin, async (req, res) => {
 app.get("/api/testimonials", async (_req, res) => {
   try {
     const rows = await allAsync(`
-      SELECT id, fullName, rating, message, approved, createdAt, photos
+      SELECT id, fullName, message, rating, approved, createdAt, photos
       FROM testimonials
       WHERE approved = 1
-      ORDER BY datetime(createdAt) DESC, id DESC
+      ORDER BY id DESC
     `)
 
-    const normalized = rows.map((row) => ({
+    const formatted = rows.map(row => ({
       id: row.id,
-      fullName: row.fullName || "",
-      rating: Number(row.rating || 5),
-      message: row.message || "",
-      approved: Number(row.approved || 0),
-      createdAt: row.createdAt || "",
-      photos: row.photos ? JSON.parse(row.photos) : [],
+      fullName: row.fullName,
+      message: row.message,
+      rating: row.rating,
+      createdAt: row.createdAt,
+      photos: row.photos ? JSON.parse(row.photos) : []
     }))
 
-    res.json(normalized)
+    res.json(formatted)
   } catch (err) {
-    console.error("PUBLIC TESTIMONIALS ERROR:", err)
-    res.status(500).json({ error: "Could not load testimonials." })
+    console.error("PUBLIC TESTIMONIAL ERROR:", err)
+    res.status(500).json({ error: "Failed to load testimonials" })
   }
 })
 
