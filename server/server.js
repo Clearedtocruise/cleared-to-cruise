@@ -3582,19 +3582,7 @@ app.get("/debug/testimonials", async (req, res) => {
     res.json({ error: err.message })
   }
 })
-app.get("/debug/add-testimonial", async (req, res) => {
-  try {
-    await runAsync(`
-      INSERT INTO testimonials (fullName, message, rating, approved)
-      VALUES ('Tim Test', 'This is a live testimonial', 5, 1)
-    `)
-
-    res.send("Inserted")
-  } catch (err) {
-    res.json({ error: err.message })
-  }
-})
-app.get("/debug/reset-testimonials", async (req, res) => {
+app.get("/fix-testimonials", async (req, res) => {
   try {
     await runAsync(`DROP TABLE IF EXISTS testimonials`)
 
@@ -3610,20 +3598,11 @@ app.get("/debug/reset-testimonials", async (req, res) => {
       )
     `)
 
-    res.send("reset complete")
+    res.send("fixed")
   } catch (err) {
     res.json({ error: err.message })
   }
 })
-app.get("/debug/delete-testimonials", async (req, res) => {
-  try {
-    await runAsync(`DELETE FROM testimonials`)
-    res.send("all testimonials deleted")
-  } catch (err) {
-    res.json({ error: err.message })
-  }
-})
-
 
 // -----------------------------
 // START
@@ -3631,7 +3610,6 @@ app.get("/debug/delete-testimonials", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`)
 })
-
 // -----------------------------
 // BOOKING FETCH HELPERS
 // -----------------------------
