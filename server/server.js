@@ -1165,36 +1165,38 @@ app.get("/api/testimonials", async (_req, res) => {
     const rows = await allAsync(`
       SELECT *
       FROM testimonials
-      WHERE COALESCE(approved, isApproved, 0) = 1
       ORDER BY id DESC
     `)
 
-    const normalized = rows.map((row) => {
-      let photos = []
+    const normalized = rows
+      .map((row) => {
+        let photos = []
 
-      try {
-        if (row.photos) {
-          photos = JSON.parse(row.photos)
-          if (!Array.isArray(photos)) photos = []
+        try {
+          if (row.photos) {
+            photos = JSON.parse(row.photos)
+            if (!Array.isArray(photos)) photos = []
+          }
+        } catch {
+          photos = []
         }
-      } catch {
-        photos = []
-      }
 
-      return {
-        id: row.id,
-        fullName: row.fullName || row.customerName || row.name || "",
-        message: row.message || row.testimonialText || row.text || "",
-        rating: Number(row.rating || 5),
-        approved: Number(
+        const approvedValue =
           row.approved ??
           row.isApproved ??
           0
-        ),
-        createdAt: row.createdAt || "",
-        photos,
-      }
-    })
+
+        return {
+          id: row.id,
+          fullName: row.fullName || row.customerName || row.name || row.full_name || "",
+          message: row.message || row.testimonialText || row.text || row.review || "",
+          rating: Number(row.rating || 5),
+          approved: Number(approvedValue || 0),
+          createdAt: row.createdAt || row.created_at || "",
+          photos,
+        }
+      })
+      .filter((row) => row.approved === 1)
 
     res.json(normalized)
   } catch (err) {
