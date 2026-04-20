@@ -618,26 +618,39 @@ body: JSON.stringify({
             />
           </label>
 
-          <label style={styles.labelFull}>
+<label style={styles.labelFull}>
   Rating
-  <div style={styles.starPickerRow}>
+  <div
+    style={{
+      ...styles.starPickerRow,
+      position: "relative",
+      zIndex: 20,
+      gap: "6px",
+    }}
+  >
     {[1, 2, 3, 4, 5].map((star) => (
       <button
         key={star}
         type="button"
         onClick={() => setTestimonialRating(star)}
         style={{
-          ...styles.starButton,
-          ...(star <= testimonialRating ? styles.starButtonActive : {}),
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          margin: 0,
+          cursor: "pointer",
+          fontSize: "24px",
+          lineHeight: 1,
+          color: star <= testimonialRating ? "#f5c518" : "#cbd5e1",
+          position: "relative",
+          zIndex: 20,
         }}
-        aria-label={`Rate ${star} star${star === 1 ? "" : "s"}`}
       >
         ★
       </button>
     ))}
   </div>
 </label>
-
           <label style={styles.labelFull}>
             Upload Photo (optional)
 <input
