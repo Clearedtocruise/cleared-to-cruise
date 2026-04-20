@@ -562,7 +562,7 @@ body: JSON.stringify({
       </div>
 
 {Array.isArray(testimonials) && testimonials.length > 0 ? (
-<div style={{ ...styles.testimonialsSliderWrap, position: "relative" }}>
+  <div style={styles.testimonialSliderWrap}>
     <button
       type="button"
       onClick={prevTestimonial}
