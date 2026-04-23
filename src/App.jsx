@@ -576,18 +576,28 @@ style={{
       {"<"}
     </button>
 
-    <div style={styles.lookupCard}>
-      <div style={styles.lookupRow}>
-        <strong>
-          {testimonials[activeTestimonialIndex]?.fullName || "Customer"}
-        </strong>
-      </div>
+<div style={styles.lookupCard}>
+  <div>
+    <strong>
+      {testimonials[activeTestimonialIndex]?.fullName || "Customer"}
+    </strong>
+  </div>
 
-      <div style={{ marginTop: "8px" }}>
-        {testimonials[activeTestimonialIndex]?.message || ""}
-      </div>
-    </div>
+  <div style={{ marginTop: "8px" }}>
+    {testimonials[activeTestimonialIndex]?.message || ""}
+  </div>
 
+  {Array.isArray(testimonials[activeTestimonialIndex]?.photos) &&
+    testimonials[activeTestimonialIndex].photos.length > 0 && (
+      <div style={styles.testimonialPhotoWrap}>
+        <img
+          src={testimonials[activeTestimonialIndex].photos[0]}
+          alt="Testimonial"
+          style={styles.testimonialPhoto}
+        />
+      </div>
+    )}
+</div>
 <button
   type="button"
   onClick={nextTestimonial}
@@ -604,10 +614,8 @@ style={{
   </div>
 ) : null}
 
-{!testimonials.length ? (
-  <div style={styles.infoBox}>No approved testimonials yet.  TEST777.</div>
-) : (
-  <div>{/* your testimonial carousel here */}</div>
+{!testimonials.length && (
+  <div style={styles.infoBox}>No approved testimonials yet.</div>
 )}
 
 <form onSubmit={submitTestimonial} style={{ marginTop: "20px" }}>
@@ -2468,22 +2476,22 @@ function AdminPage() {
                       </td>
                       <td style={styles.adminTd}>{item.rentalLabel || "—"}</td>
                       <td style={styles.adminTd}>{item.message || "—"}</td>
-                      <td style={styles.adminTd}>
-                        {Array.isArray(item.photos) && item.photos.length > 0 ? (
-  <img
-    src={item.photos[0]}
-    alt="Testimonial"
-    style={styles.adminImagePreview}
-  />
-) : (
-  "—"
-)}
-                      </td>
-                      <td style={styles.adminTd}>
-                       <span style={statusPillStyle(item.approved ? "confirmed" : "pending_approval")}>
-  {item.approved ? "approved" : "pending"}
-</span>
-                      </td>
+                     <td style={styles.adminTd}>
+  {Array.isArray(item.photos) && item.photos.length > 0 ? (
+    <img
+      src={item.photos[0]}
+      alt="Testimonial"
+      style={styles.adminImagePreview}
+    />
+  ) : (
+    "—"
+  )}
+</td>
+<td style={styles.adminTd}>
+  <span style={statusPillStyle(item.approved ? "confirmed" : "pending_approval")}>
+    {item.approved ? "approved" : "pending"}
+  </span>
+</td>
                       <td style={styles.adminTd}>
                         <div style={styles.adminButtonRow}>
                           <button
