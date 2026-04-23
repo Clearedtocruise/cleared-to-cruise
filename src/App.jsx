@@ -508,35 +508,34 @@ function TestimonialsSection({ testimonials = [], onSubmitted }) {
     )
   }
 
-  async function submitTestimonial(e) {
+async function submitTestimonial(e) {
   e.preventDefault()
+
   setTestimonialStatus("")
 
   if (!testimonialName.trim() || !testimonialText.trim()) {
-    setTestimonialStatus("Please enter your name and testimonial.")
+    setTestimonialStatus("Please enter your name and testimonial")
     return
   }
 
   setTestimonialLoading(true)
 
   try {
-const res = await fetch(`${API}/api/testimonials`, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-body: JSON.stringify({
-  fullName: testimonialName.trim(),
-  message: testimonialText.trim(),
-  rating: testimonialRating
-}),
-})
+    const formData = new FormData()
+    formData.append("fullName", testimonialName)
+    formData.append("message", testimonialText)
+    formData.append("rating", testimonialRating)
 
-    const data = await res.json().catch(() => ({}))
+    testimonialPhotos.forEach((file) => {
+      formData.append("photos", file)
+    })
 
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to submit testimonial.")
-    }
+    const res = await fetch(`${API}/api/testimonials`, {
+      method: "POST",
+      body: formData,
+    })
+
+    if (!res.ok) throw new Error("Failed to submit testimonial")
 
     setTestimonialStatus("Submitted for approval!")
     setTestimonialName("")
@@ -544,7 +543,7 @@ body: JSON.stringify({
     setTestimonialPhotos([])
     setTestimonialRating(5)
   } catch (err) {
-    setTestimonialStatus(err.message || "Error submitting testimonial.")
+    setTestimonialStatus(err.message || "Error submitting testimonial")
   } finally {
     setTestimonialLoading(false)
   }
@@ -606,90 +605,45 @@ style={{
 ) : (
   <div style={styles.infoBox}>No approved testimonials yet.</div>
 )}
-      <form onSubmit={submitTestimonial} style={{ marginTop: "20px" }}>
-        <div style={styles.formGrid}>
-          <label style={styles.label}>
-            Your Name
-            <input
-              style={styles.input}
-              type="text"
-              value={testimonialName}
-              onChange={(e) => setTestimonialName(e.target.value)}
-              placeholder="Your name"
-            />
-          </label>
-
-          <label style={styles.labelFull}>
-            Your Testimonial
-            <textarea
-              style={styles.textarea}
-              value={testimonialText}
-              onChange={(e) => setTestimonialText(e.target.value)}
-              placeholder="Write your experience..."
-            />
-          </label>
-
-<label style={styles.labelFull}>
-  Rating
-  <div
-    style={{
-      ...styles.starPickerRow,
-      position: "relative",
-      zIndex: 20,
-      gap: "6px",
-    }}
-  >
-    {[1, 2, 3, 4, 5].map((star) => (
-      <button
-        key={star}
-        type="button"
-        onClick={() => setTestimonialRating(star)}
-        style={{
-          background: "transparent",
-          border: "none",
-          padding: 0,
-          margin: 0,
-          cursor: "pointer",
-          fontSize: "24px",
-          lineHeight: 1,
-          color: star <= testimonialRating ? "#f5c518" : "#cbd5e1",
-          position: "relative",
-          zIndex: 20,
-        }}
-      >
-        ★
-      </button>
-    ))}
-  </div>
-</label>
-<label style={styles.labelFull}>
-  Upload Photo (optional)
-  <input
-    style={styles.fileInput}
-    type="file"
-    accept="image/*"
-    multiple
-    onChange={(e) => {
-      const files = Array.from(e.target.files || []).slice(0, 7)
-      setTestimonialPhotos(files)
-    }}
-  />
-</label>
-
-<div style={styles.testimonialActionRow}>
-  <button
-    type="submit"
-    style={styles.primaryButton}
-    disabled={testimonialLoading}
-  >
-    {testimonialLoading ? "Submitting..." : "Submit Testimonial"}
-  </button>
-</div>
-
-{testimonialStatus && (
-  <div style={styles.infoBox}>{testimonialStatus}</div>
+{!testimonials.length ? (
+  <div style={styles.infoBox}>No approved testimonials yet.</div>
+) : (
+  <div>/* your testimonial carousel here */</div>
 )}
 
+<form onSubmit={submitTestimonial} style={{ marginTop: "20px" }}>
+  <div style={styles.formGrid}>
+    
+    <label style={styles.label}>
+      Your Name
+      <input
+        style={styles.input}
+        type="text"
+        value={testimonialName}
+        onChange={(e) => setTestimonialName(e.target.value)}
+        placeholder="Your name"
+      />
+    </label>
+
+    <label style={styles.labelFull}>
+      Your Testimonial
+      <textarea
+        style={styles.textarea}
+        value={testimonialText}
+        onChange={(e) => setTestimonialText(e.target.value)}
+        placeholder="Write your experience..."
+      />
+    </label>
+
+  </div>
+
+  <button type="submit" style={styles.primaryButton}>
+    {testimonialLoading ? "Submitting..." : "Submit Testimonial"}
+  </button>
+
+  {testimonialStatus && (
+    <div style={styles.infoBox}>{testimonialStatus}</div>
+  )}
 </form>
 </section>
 )
