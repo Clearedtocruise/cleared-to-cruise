@@ -615,7 +615,11 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
           `,
           [session.id || null, session.payment_intent || null, bookingId]
         )
-await syncBookingToSupabaseById(bookingId)
+try {
+  await syncBookingToSupabaseById(bookingId)
+} catch (err) {
+  console.error("SUPABASE SYNC ERROR:", err)
+}
 
         const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [bookingId])
 
@@ -1674,7 +1678,11 @@ app.post("/api/bookings/waiver", upload.single("photoId"), async (req, res) => {
 
     const bookingId = result.lastID
 
-await syncBookingToSupabaseById(bookingId)
+try {
+  await syncBookingToSupabaseById(bookingId)
+} catch (err) {
+  console.error("SUPABASE SYNC ERROR:", err)
+}
 
 const bookingForEmail = {
   id: bookingId,
@@ -2159,7 +2167,11 @@ async function approveBookingCore(id) {
 
   await runAsync(`UPDATE bookings SET status = 'approved_unpaid' WHERE id = ?`, [id])
   const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
-await syncBookingToSupabaseById(id)
+try {
+  await syncBookingToSupabaseById(bookingId)
+} catch (err) {
+  console.error("SUPABASE SYNC ERROR:", err)
+}
 
   const normalizedUpdated = {
     ...updated,
