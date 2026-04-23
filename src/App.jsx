@@ -636,19 +636,34 @@ style={{
     </label>
 
   </div>
+<div style={{ marginTop: "20px" }}>
+  <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>
+    Upload Photos
+  </label>
 
+  <input
+    type="file"
+    name="photos"
+    multiple
+    accept="image/*"
+    onChange={(e) => setPhotos(Array.from(e.target.files || []))}
+    style={{ marginBottom: "10px" }}
+  />
+</div>
+
+<div style={{ marginTop: "25px" }}>
   <button type="submit" style={styles.primaryButton}>
     {testimonialLoading ? "Submitting..." : "Submit Testimonial"}
   </button>
+</div>
 
-  {testimonialStatus && (
-    <div style={styles.infoBox}>{testimonialStatus}</div>
-  )}
+{testimonialStatus && (
+  <div style={styles.infoBox}>{testimonialStatus}</div>
+)}
 </form>
 </section>
 )
 }
-
 function BookingLookupCard({ onLoadBooking }) {
   const [lookupBookingId, setLookupBookingId] = useState("")
   const [lookupEmail, setLookupEmail] = useState("")
@@ -955,6 +970,7 @@ function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
+  const [photos, setPhotos] = useState([])
 
   const [blockDate, setBlockDate] = useState("")
   const [blockReason, setBlockReason] = useState("")
