@@ -602,13 +602,12 @@ style={{
   {">"}
 </button>
   </div>
-) : (
-  <div style={styles.infoBox}>No approved testimonials yet.</div>
-)}
+) : null}
+
 {!testimonials.length ? (
   <div style={styles.infoBox}>No approved testimonials yet.</div>
 ) : (
-  <div>/* your testimonial carousel here */</div>
+  <div>{/* your testimonial carousel here */}</div>
 )}
 
 <form onSubmit={submitTestimonial} style={{ marginTop: "20px" }}>
@@ -647,7 +646,7 @@ style={{
     multiple
     accept="image/*"
     onChange={(e) => setPhotos(Array.from(e.target.files || []))}
-    style={{ marginBottom: "10px" }}
+    style={{ marginBottom: "20px" }}
   />
 </div>
 
@@ -2796,6 +2795,17 @@ function MainApp() {
   const [testimonials, setTestimonials] = useState([])
   const [activeTestimonialIndex, setActiveTestimonialIndex] = useState(0)
 const [activePhotoIndexes, setActivePhotoIndexes] = useState({})
+useEffect(() => {
+  fetch(`${API}/api/testimonials`)
+    .then(res => res.json())
+    .then(data => {
+      setTestimonials(data || [])
+    })
+    .catch(err => {
+      console.error("Failed to load testimonials:", err)
+    })
+}, [])
+
 function nextTestimonial() {
   setActiveTestimonialIndex((prev) =>
     prev === testimonials.length - 1 ? 0 : prev + 1
