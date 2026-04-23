@@ -858,15 +858,9 @@ if (!fs.existsSync(uploadsDir)) {
 
 app.use("/uploads", express.static(uploadsDir))
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (_req, file, cb) => {
-    const safeName = file.originalname.replace(/\s+/g, "-")
-    cb(null, `${Date.now()}-${safeName}`)
-  },
+const upload = multer({
+  storage: multer.memoryStorage(),
 })
-
-const upload = multer({ storage })
 
 // -----------------------------
 // SCHEMA + MIGRATIONS
@@ -1207,38 +1201,57 @@ app.get("/api/testimonials", async (_req, res) => {
 // Submit testimonial with up to 7 photos
 app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
   try {
-    const fullName = String(req.body.fullName || req.body.customerName || req.body.name || "").trim()
-    const message = String(req.body.message || req.body.testimonialText || req.body.text || "").trim()
+    const fullName = String(req.body.fullName || "")
+    const message = String(req.body.message || "")
     const rating = Number(req.body.rating || 5)
-    const files = Array.isArray(req.files) ? req.files : []
-const photoPaths = files.map((file) => `/uploads/${file.filename}`)
 
-const { data, error } = await supabase
-  .from("testimonials")
-  .insert([
-    {
-      fullName,
-      message,
-      rating,
-      approved: false,
-      photos: JSON.stringify(photoPaths),
-    },
-  ])
-  .select()
+    const files = Array.isArray(req.files) ? req.files : []
+
+    const photoUrls = []
+
+    for (const file of files) {
+      const fileName = `testimonial-${Date.now()}-${file.originalname}`
+
+      const { data, error } = await supabase.storage
+        .from("testimonials") // your bucket name
+        .upload(fileName, file.buffer, {
+          contentType: file.mimetype,
+        })
+
+      if (error) {
+        console.error("UPLOAD ERROR:", error)
+        continue
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from("testimonials")
+        .getPublicUrl(fileName)
+
+      photoUrls.push(publicUrlData.publicUrl)
+    }
+
+    const { data, error } = await supabase
+      .from("testimonials")
+      .insert([
+        {
+          fullName,
+          message,
+          rating,
+          approved: false,
+          photos: photoUrls, // IMPORTANT: no stringify
+        },
+      ])
+      .select()
 
     if (error) {
-      console.error("SUPABASE TESTIMONIAL INSERT ERROR:", error)
+      console.error("INSERT ERROR:", error)
       return res.status(500).json({ error: error.message })
     }
 
-    return res.json({
-      success: true,
-      id: data?.[0]?.id || null,
-      message: "Submitted for approval!",
-    })
+    res.json({ success: true })
   } catch (err) {
-    console.error("SUBMIT TESTIMONIAL ERROR:", err)
-    return res.status(500).json({ error: "Could not submit testimonial." })
+    console.error("POST TESTIMONIAL ERROR:", err)
+    res.status(500).json({ error: "Server error" })
   }
 })
 
