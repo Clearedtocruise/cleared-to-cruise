@@ -605,7 +605,7 @@ style={{
 ) : null}
 
 {!testimonials.length ? (
-  <div style={styles.infoBox}>No approved testimonials yet.</div>
+  <div style={styles.infoBox}>No approved testimonials yet.  TEST777.</div>
 ) : (
   <div>{/* your testimonial carousel here */}</div>
 )}
