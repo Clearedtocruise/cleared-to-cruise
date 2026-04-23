@@ -83,12 +83,16 @@ const DEFAULT_PRICING = [
 // -----------------------------
 function parseTestimonialPhotos(value) {
   if (!value) return []
-  try {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
+  if (Array.isArray(value)) return value.filter(Boolean)
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : []
+    } catch {
+      return value ? [value].filter(Boolean) : []
+    }
   }
+  return []
 }
 function escapeHtml(value) {
   return String(value ?? "")
@@ -1230,18 +1234,18 @@ app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
       photoUrls.push(publicUrlData.publicUrl)
     }
 
-    const { data, error } = await supabase
-      .from("testimonials")
-      .insert([
-        {
-          fullName,
-          message,
-          rating,
-          approved: false,
-          photos: photoUrls, // IMPORTANT: no stringify
-        },
-      ])
-      .select()
+   const { data, error } = await supabase
+  .from("testimonials")
+  .insert([
+    {
+      fullName,
+      message,
+      rating,
+      approved: false,
+      photos: JSON.stringify(photoUrls),
+    },
+  ])
+  .select()
 
     if (error) {
       console.error("INSERT ERROR:", error)
@@ -1692,7 +1696,7 @@ app.post("/api/bookings/waiver", upload.single("photoId"), async (req, res) => {
     const bookingId = result.lastID
 
 try {
-  await syncBookingToSupabaseById(bookingId)
+  await syncBookingToSupabaseById(Id)
 } catch (err) {
   console.error("SUPABASE SYNC ERROR:", err)
 }

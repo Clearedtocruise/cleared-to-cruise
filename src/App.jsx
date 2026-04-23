@@ -640,15 +640,21 @@ style={{
     Upload Photos
   </label>
 
-  <input
-    type="file"
-    name="photos"
-    multiple
-    accept="image/*"
-    onChange={(e) => setPhotos(Array.from(e.target.files || []))}
-    style={{ marginBottom: "20px" }}
-  />
+<input
+  type="file"
+  name="photos"
+  multiple
+  accept="image/*"
+  onChange={(e) => setTestimonialPhotos(Array.from(e.target.files || []))}
+  style={{ marginBottom: "12px" }}
+/>
 </div>
+{testimonialPhotos.length > 0 && (
+  <div style={styles.lookupMeta}>
+    {testimonialPhotos.length} photo{testimonialPhotos.length === 1 ? "" : "s"} selected
+  </div>
+)}
+
 
 <div style={{ marginTop: "25px" }}>
   <button type="submit" style={styles.primaryButton}>
@@ -2463,20 +2469,20 @@ function AdminPage() {
                       <td style={styles.adminTd}>{item.rentalLabel || "—"}</td>
                       <td style={styles.adminTd}>{item.message || "—"}</td>
                       <td style={styles.adminTd}>
-                        {item.photoUrl ? (
-                          <img
-                            src={item.photoUrl}
-                            alt="Testimonial"
-                            style={styles.adminImagePreview}
-                          />
-                        ) : (
-                          "—"
-                        )}
+                        {Array.isArray(item.photos) && item.photos.length > 0 ? (
+  <img
+    src={item.photos[0]}
+    alt="Testimonial"
+    style={styles.adminImagePreview}
+  />
+) : (
+  "—"
+)}
                       </td>
                       <td style={styles.adminTd}>
-                        <span style={statusPillStyle(item.Approved ? "confirmed" : "pending_approval")}>
-                          {item.isApproved ? "approved" : "pending"}
-                        </span>
+                       <span style={statusPillStyle(item.approved ? "confirmed" : "pending_approval")}>
+  {item.approved ? "approved" : "pending"}
+</span>
                       </td>
                       <td style={styles.adminTd}>
                         <div style={styles.adminButtonRow}>
