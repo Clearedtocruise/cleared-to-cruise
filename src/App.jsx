@@ -3661,11 +3661,11 @@ header: {
 fileInput: {
   display: "block",
   marginTop: "10px",
-  marginBottom: "24px",
+  marginBottom: "32px",
 },
 
 testimonialActionRow: {
-  marginTop: "32px",
+  marginTop: "40px",
 },
 
 headerRow: {
