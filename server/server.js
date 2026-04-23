@@ -1190,7 +1190,7 @@ app.get("/api/testimonials", async (_req, res) => {
       ...row,
       rating: Number(row.rating || 5),
       approved: Boolean(row.approved),
-      photos: Array.isArray(row.photos) ? row.photos : [],
+      photos: parseTestimonialPhotos(row.photos),
     }))
 
     return res.json(normalized)
@@ -1255,7 +1255,7 @@ app.get("/api/admin/testimonials", requireAdminLogin, async (_req, res) => {
       ...row,
       rating: Number(row.rating || 5),
       approved: Boolean(row.approved),
-      photos: Array.isArray(row.photos) ? row.photos : [],
+     photos: parseTestimonialPhotos(row.photos),
     }))
 
     return res.json(normalized)

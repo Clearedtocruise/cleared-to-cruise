@@ -606,7 +606,6 @@ style={{
 ) : (
   <div style={styles.infoBox}>No approved testimonials yet.</div>
 )}
-
       <form onSubmit={submitTestimonial} style={{ marginTop: "20px" }}>
         <div style={styles.formGrid}>
           <label style={styles.label}>
@@ -687,12 +686,13 @@ style={{
   </button>
 </div>
 
-        {testimonialStatus && (
-          <div style={styles.infoBox}>{testimonialStatus}</div>
-        )}
-      </form>
-    </section>
-  )
+{testimonialStatus && (
+  <div style={styles.infoBox}>{testimonialStatus}</div>
+)}
+
+</form>
+</section>
+)
 }
 
 function BookingLookupCard({ onLoadBooking }) {
