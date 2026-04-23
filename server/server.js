@@ -1207,24 +1207,20 @@ app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
     const message = String(req.body.message || req.body.testimonialText || req.body.text || "").trim()
     const rating = Number(req.body.rating || 5)
     const files = Array.isArray(req.files) ? req.files : []
-    const photoPaths = files.map((file) => `/uploads/${file.filename}`)
+const photoPaths = files.map((file) => `/uploads/${file.filename}`)
 
-    if (!fullName || !message) {
-      return res.status(400).json({ error: "Name and testimonial text are required." })
-    }
-
-    const { data, error } = await supabase
-      .from("testimonials")
-      .insert([
-        {
-          fullName,
-          message,
-          rating,
-          approved: false,
-          photos: photoPaths,
-        },
-      ])
-      .select()
+const { data, error } = await supabase
+  .from("testimonials")
+  .insert([
+    {
+      fullName,
+      message,
+      rating,
+      approved: false,
+      photos: JSON.stringify(photoPaths),
+    },
+  ])
+  .select()
 
     if (error) {
       console.error("SUPABASE TESTIMONIAL INSERT ERROR:", error)
