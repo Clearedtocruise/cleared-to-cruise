@@ -613,7 +613,7 @@ style={{
 
 <form onSubmit={submitTestimonial} style={{ marginTop: "20px" }}>
   <div style={styles.formGrid}>
-
+    
     <label style={styles.label}>
       Your Name
       <input
@@ -631,16 +631,19 @@ style={{
         style={styles.textarea}
         value={testimonialText}
         onChange={(e) => setTestimonialText(e.target.value)}
-        placeholder="Share your experience"
+        placeholder="Write your experience..."
       />
     </label>
 
-  </div> {/* ✅ THIS WAS MISSING */}
+  </div>
 
-  <button type="submit">
-    Submit Testimonial
+  <button type="submit" style={styles.primaryButton}>
+    {testimonialLoading ? "Submitting..." : "Submit Testimonial"}
   </button>
 
+  {testimonialStatus && (
+    <div style={styles.infoBox}>{testimonialStatus}</div>
+  )}
 </form>
 </section>
 )
