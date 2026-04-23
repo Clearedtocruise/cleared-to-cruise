@@ -663,23 +663,29 @@ style={{
     ))}
   </div>
 </label>
-          <label style={styles.labelFull}>
-            Upload Photo (optional)
-<input
-  type="file"
-  multiple
-  onChange={(e) => setTestimonialPhotos(Array.from(e.target.files))}
-/>
-          </label>
-        </div>
+<label style={styles.labelFull}>
+  Upload Photo (optional)
+  <input
+    style={styles.fileInput}
+    type="file"
+    accept="image/*"
+    multiple
+    onChange={(e) => {
+      const files = Array.from(e.target.files || []).slice(0, 7)
+      setTestimonialPhotos(files)
+    }}
+  />
+</label>
 
-        <button
-          type="submit"
-          style={styles.primaryButton}
-          disabled={testimonialLoading}
-        >
-          {testimonialLoading ? "Submitting..." : "Submit Testimonial"}
-        </button>
+<div style={styles.testimonialActionRow}>
+  <button
+    type="submit"
+    style={styles.primaryButton}
+    disabled={testimonialLoading}
+  >
+    {testimonialLoading ? "Submitting..." : "Submit Testimonial"}
+  </button>
+</div>
 
         {testimonialStatus && (
           <div style={styles.infoBox}>{testimonialStatus}</div>
@@ -3652,6 +3658,16 @@ header: {
   margin: "0 auto",
   padding: "0",   // ← remove vertical padding
 },
+fileInput: {
+  display: "block",
+  marginTop: "10px",
+  marginBottom: "18px",
+},
+
+testimonialActionRow: {
+  marginTop: "18px",
+},
+
 headerRow: {
   display: "flex",
   justifyContent: "center",

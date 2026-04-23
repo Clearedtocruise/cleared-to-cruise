@@ -16,8 +16,14 @@ const path = require("path")
 const fs = require("fs")
 const Stripe = require("stripe")
 const nodemailer = require("nodemailer")
+const { createClient } = require("@supabase/supabase-js")
 
 const app = express()
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+)
 
 const PORT = Number(process.env.PORT || 5001)
 const CLIENT_URL = String(process.env.CLIENT_URL || "http://localhost:5173").replace(/\/$/, "")
@@ -609,6 +615,7 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
           `,
           [session.id || null, session.payment_intent || null, bookingId]
         )
+await syncBookingToSupabaseById(bookingId)
 
         const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [bookingId])
 
@@ -1168,138 +1175,137 @@ app.post("/api/admin/pricing", requireAdminLogin, async (req, res) => {
 // Public testimonials
 app.get("/api/testimonials", async (_req, res) => {
   try {
-    const rows = await allAsync(`
-      SELECT id, fullName, message, rating, approved, createdAt, photos
-      FROM testimonials
-      WHERE approved = 1
-      ORDER BY datetime(createdAt) DESC, id DESC
-    `)
+    const { data, error } = await supabase
+      .from("testimonials")
+      .select("*")
+      .eq("approved", true)
+      .order("created_at", { ascending: false })
 
-    res.json(
-      rows.map((row) => ({
-        id: row.id,
-        fullName: row.fullName || "",
-        message: row.message || "",
-        rating: Number(row.rating || 5),
-        approved: Number(row.approved || 0),
-        createdAt: row.createdAt || "",
-        photos: parseTestimonialPhotos(row.photos),
-      }))
-    )
+    if (error) {
+      console.error("SUPABASE TESTIMONIAL LOAD ERROR:", error)
+      return res.status(500).json({ error: error.message })
+    }
+
+    const normalized = (data || []).map((row) => ({
+      ...row,
+      rating: Number(row.rating || 5),
+      approved: Boolean(row.approved),
+      photos: Array.isArray(row.photos) ? row.photos : [],
+    }))
+
+    return res.json(normalized)
   } catch (err) {
     console.error("TESTIMONIAL LOAD ERROR:", err)
-    res.status(500).json({ error: "Failed to load testimonials" })
+    return res.status(500).json({ error: "Failed to load testimonials." })
   }
 })
 
-// Submit testimonial
-app.post("/api/testimonials", express.json(), async (req, res) => {
+// Submit testimonial with up to 7 photos
+app.post("/api/testimonials", upload.array("photos", 7), async (req, res) => {
   try {
-    console.log("TESTIMONIAL BODY:", req.body)
-
-    const fullName = String(
-      req.body.fullName || req.body.customerName || req.body.name || ""
-    ).trim()
-
-    const message = String(
-      req.body.message || req.body.testimonialText || req.body.text || ""
-    ).trim()
-
-    const rating = Math.max(1, Math.min(5, Number(req.body.rating || 5) || 5))
+    const fullName = String(req.body.fullName || req.body.customerName || req.body.name || "").trim()
+    const message = String(req.body.message || req.body.testimonialText || req.body.text || "").trim()
+    const rating = Number(req.body.rating || 5)
+    const files = Array.isArray(req.files) ? req.files : []
+    const photoPaths = files.map((file) => `/uploads/${file.filename}`)
 
     if (!fullName || !message) {
       return res.status(400).json({ error: "Name and testimonial text are required." })
     }
 
-    const result = await runAsync(
-      `
-      INSERT INTO testimonials (
-        fullName,
-        message,
-        rating,
-        approved,
-        createdAt,
-        photos
-      )
-      VALUES (?, ?, ?, 0, datetime('now'), '[]')
-      `,
-      [fullName, message, rating]
-    )
+    const { data, error } = await supabase
+      .from("testimonials")
+      .insert([
+        {
+          fullName,
+          message,
+          rating,
+          approved: false,
+          photos: photoPaths,
+        },
+      ])
+      .select()
+
+    if (error) {
+      console.error("SUPABASE TESTIMONIAL INSERT ERROR:", error)
+      return res.status(500).json({ error: error.message })
+    }
 
     return res.json({
       success: true,
-      id: result.lastID,
+      id: data?.[0]?.id || null,
       message: "Submitted for approval!",
     })
   } catch (err) {
     console.error("SUBMIT TESTIMONIAL ERROR:", err)
-    return res.status(500).json({
-      error: err.message || "Could not submit testimonial.",
-    })
+    return res.status(500).json({ error: "Could not submit testimonial." })
   }
 })
 
 // Admin testimonials list
-app.get("/api/admin/testimonials", async (_req, res) => {
+app.get("/api/admin/testimonials", requireAdminLogin, async (_req, res) => {
   try {
-    const rows = await allAsync(`
-      SELECT id, fullName, rating, message, approved, createdAt, photos
-      FROM testimonials
-      ORDER BY datetime(createdAt) DESC, id DESC
-    `)
+    const { data, error } = await supabase
+      .from("testimonials")
+      .select("*")
+      .order("created_at", { ascending: false })
 
-    const normalized = rows.map((row) => ({
-      id: row.id,
-      fullName: row.fullName || "",
+    if (error) {
+      console.error("ADMIN TESTIMONIALS ERROR:", error)
+      return res.status(500).json({ error: error.message })
+    }
+
+    const normalized = (data || []).map((row) => ({
+      ...row,
       rating: Number(row.rating || 5),
-      message: row.message || "",
-      approved: Number(row.approved || 0),
-      createdAt: row.createdAt || "",
-      photos: row.photos ? JSON.parse(row.photos) : [],
+      approved: Boolean(row.approved),
+      photos: Array.isArray(row.photos) ? row.photos : [],
     }))
 
-    res.json(normalized)
+    return res.json(normalized)
   } catch (err) {
     console.error("ADMIN TESTIMONIALS ERROR:", err)
-    res.status(500).json({ error: "Could not load admin testimonials." })
+    return res.status(500).json({ error: "Could not load admin testimonials." })
   }
 })
 
 // Approve testimonial
 app.post("/api/admin/testimonials/:id/approve", requireAdminLogin, async (req, res) => {
   try {
-    const result = await runAsync(
-      `UPDATE testimonials SET approved = 1 WHERE id = ?`,
-      [req.params.id]
-    )
+    const { error } = await supabase
+      .from("testimonials")
+      .update({ approved: true })
+      .eq("id", Number(req.params.id))
 
-    if (!result.changes) {
-      return res.status(404).json({ error: "Testimonial not found." })
+    if (error) {
+      console.error("APPROVE TESTIMONIAL ERROR:", error)
+      return res.status(500).json({ error: error.message })
     }
 
-    res.json({ success: true })
+    return res.json({ success: true })
   } catch (err) {
     console.error("APPROVE TESTIMONIAL ERROR:", err)
-    res.status(500).json({ error: "Could not approve testimonial." })
+    return res.status(500).json({ error: "Could not approve testimonial." })
   }
 })
 
 // Deny testimonial
 app.post("/api/admin/testimonials/:id/deny", requireAdminLogin, async (req, res) => {
   try {
-    const result = await runAsync(
-      `DELETE FROM testimonials WHERE id = ?`,
-      [req.params.id]
-    )
+    const { error } = await supabase
+      .from("testimonials")
+      .delete()
+      .eq("id", Number(req.params.id))
 
-    if (!result.changes) {
-      return res.status(404).json({ error: "Testimonial not found." })
+    if (error) {
+      console.error("DENY TESTIMONIAL ERROR:", error)
+      return res.status(500).json({ error: error.message })
     }
 
-    res.json({ success: true })
+    return res.json({ success: true })
   } catch (err) {
     console.error("DENY TESTIMONIAL ERROR:", err)
-    res.status(500).json({ error: "Could not deny testimonial." })
+    return res.status(500).json({ error: "Could not deny testimonial." })
   }
 })
 
@@ -1672,19 +1678,21 @@ app.post("/api/bookings/waiver", upload.single("photoId"), async (req, res) => {
 
     const bookingId = result.lastID
 
-    const bookingForEmail = {
-      id: bookingId,
-      rentalLabel,
-      date,
-      rentalTime: rentalTime || "",
-      towLocation: towLocation || "None",
-      customerEmail: normalizedCustomerEmail || "",
-      waiverPrintedName,
-      photoIdPath: req.file ? `./uploads/${req.file.filename}` : null,
-      status: "pending_approval",
-    }
+await syncBookingToSupabaseById(bookingId)
 
-    sendAdminApprovalEmail(bookingForEmail).catch((emailErr) => {
+const bookingForEmail = {
+  id: bookingId,
+  rentalLabel,
+  date,
+  rentalTime: rentalTime || "",
+  towLocation: towLocation || "None",
+  customerEmail: normalizedCustomerEmail || "",
+  waiverPrintedName,
+  photoIdPath: req.file ? `./uploads/${req.file.filename}` : null,
+  status: "pending_approval",
+}
+
+ sendAdminApprovalEmail(bookingForEmail).catch((emailErr) => {
       console.error("ADMIN APPROVAL EMAIL ERROR:", emailErr)
     })
 
@@ -2155,6 +2163,7 @@ async function approveBookingCore(id) {
 
   await runAsync(`UPDATE bookings SET status = 'approved_unpaid' WHERE id = ?`, [id])
   const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+await syncBookingToSupabaseById(id)
 
   const normalizedUpdated = {
     ...updated,
