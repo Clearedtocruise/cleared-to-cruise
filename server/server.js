@@ -4709,6 +4709,65 @@ app.post("/api/admin/lake-contacts", requireAdminLogin, async (req, res) => {
   }
 })
 
+app.post("/api/admin/bookings/manual", requireAdminLogin, (req, res) => {
+  const {
+    rentalLabel,
+    boatType,
+    date,
+    rentalTime,
+    towLocation,
+    customerEmail,
+    waiverPrintedName
+  } = req.body;
+
+  if (!rentalLabel || !date || !customerEmail) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  const id = Date.now().toString();
+
+  db.run(
+    `INSERT INTO bookings (
+      id,
+      rentalLabel,
+      boatType,
+      date,
+      rentalTime,
+      towLocation,
+      customerEmail,
+      waiverPrintedName,
+      status,
+      paymentStatus,
+      depositStatus,
+      waiverStatus,
+      createdAt
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      rentalLabel,
+      boatType || "",
+      date,
+      rentalTime || "",
+      towLocation || "None",
+      customerEmail,
+      waiverPrintedName || "",
+      "approved_unpaid",
+      "unpaid",
+      "not_scheduled",
+      "not_started",
+      new Date().toISOString()
+    ],
+    function (err) {
+      if (err) {
+        console.error("Manual booking error:", err);
+        return res.status(500).json({ error: "Failed to create booking" });
+      }
+
+      res.json({ success: true, bookingId: id });
+    }
+  );
+});
+
 // -----------------------------
 // UPDATED RENTAL PACKET BUILDERS
 // -----------------------------
