@@ -3220,9 +3220,7 @@ setShowWaiver(true)
 
 return (
   <div style={styles.page}>
-    <h1 style={{ color: "red", fontSize: "40px" }}>LIVE TEST 999</h1>
-
-    <header style={styles.header}>
+ <header style={styles.header}>
         <div style={styles.headerRow}>
          <div style={styles.heroHeader}>
   <img src={HEADER_LOGO} alt="Cleared to Cruise" style={styles.heroLogo} />
