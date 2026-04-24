@@ -589,7 +589,7 @@ style={{
 
   {Array.isArray(testimonials[activeTestimonialIndex]?.photos) &&
     testimonials[activeTestimonialIndex].photos.length > 0 && (
-      <div style={styles.testimonialPhotoWrap}>
+<div style={styles.testimonialPhotoGrid}>
   {testimonials[activeTestimonialIndex].photos.map((photo, index) => (
     <img
       key={index}
@@ -4594,10 +4594,17 @@ testimonialPhotoWrap: {
 
 testimonialPhoto: {
   width: "100%",
-  maxHeight: "420px",
+  height: "160px",
   objectFit: "contain",
   borderRadius: "10px",
   background: "#f3f5f7",
+},
+
+testimonialPhotoGrid: {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+  gap: "10px",
+  marginTop: "14px",
 },
 
 testimonialPhotoArrow: {
