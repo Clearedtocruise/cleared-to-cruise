@@ -590,12 +590,15 @@ style={{
   {Array.isArray(testimonials[activeTestimonialIndex]?.photos) &&
     testimonials[activeTestimonialIndex].photos.length > 0 && (
       <div style={styles.testimonialPhotoWrap}>
-        <img
-          src={testimonials[activeTestimonialIndex].photos[0]}
-          alt="Testimonial"
-          style={styles.testimonialPhoto}
-        />
-      </div>
+  {testimonials[activeTestimonialIndex].photos.map((photo, index) => (
+    <img
+      key={index}
+      src={photo}
+      alt={`Testimonial ${index}`}
+      style={styles.testimonialPhoto}
+    />
+  ))}
+</div>
     )}
 </div>
 <button
@@ -4591,8 +4594,10 @@ testimonialPhotoWrap: {
 
 testimonialPhoto: {
   width: "100%",
-  height: "300px",
-  objectFit: "cover",
+  maxHeight: "420px",
+  objectFit: "contain",
+  borderRadius: "10px",
+  background: "#f3f5f7",
 },
 
 testimonialPhotoArrow: {
