@@ -2492,6 +2492,7 @@ function AdminPage() {
     {item.approved ? "approved" : "pending"}
   </span>
 </td>
+
                       <td style={styles.adminTd}>
                         <div style={styles.adminButtonRow}>
                           <button
@@ -3217,9 +3218,11 @@ setShowWaiver(true)
     setWaiverAccepted(false)
   }
 
-  return (
-    <div style={styles.page}>
-      <header style={styles.header}>
+return (
+  <div style={styles.page}>
+    <h1 style={{ color: "red", fontSize: "40px" }}>LIVE TEST 999</h1>
+
+    <header style={styles.header}>
         <div style={styles.headerRow}>
          <div style={styles.heroHeader}>
   <img src={HEADER_LOGO} alt="Cleared to Cruise" style={styles.heroLogo} />
