@@ -9,10 +9,7 @@ const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY)
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <Elements stripe={stripePromise}>
-      <>
-        <h1 style={{ color: "red", fontSize: "40px" }}>LIVE TEST 999</h1>
-        <App />
-      </>
+      <App />
     </Elements>
   </React.StrictMode>
 )
