@@ -1014,6 +1014,15 @@ function AdminPage() {
   const [editCustomerEmail, setEditCustomerEmail] = useState("")
   const [editPrintedName, setEditPrintedName] = useState("")
   const [editStatus, setEditStatus] = useState("pending_approval")
+  const [manualBooking, setManualBooking] = useState({
+  waiverPrintedName: "",
+  customerEmail: "",
+  rentalLabel: "Jet Ski (Single)",
+  boatType: "Jet Ski",
+  date: "",
+  rentalTime: "08:00 AM",
+  towLocation: "None",
+})
 
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date()
@@ -1209,6 +1218,39 @@ function AdminPage() {
       setMessage("")
     }
   }
+async function createManualBooking() {
+  try {
+    setMessage("")
+    setError("")
+
+    const res = await adminFetch("/api/admin/bookings/manual", {
+      method: "POST",
+      body: JSON.stringify(manualBooking),
+    })
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      throw new Error(data.error || "Could not create manual booking.")
+    }
+
+    setMessage(`Manual booking created. Booking ID: ${data.bookingId}`)
+
+    setManualBooking({
+      waiverPrintedName: "",
+      customerEmail: "",
+      rentalLabel: "Jet Ski (Single)",
+      boatType: "Jet Ski",
+      date: "",
+      rentalTime: "08:00 AM",
+      towLocation: "None",
+    })
+
+    await loadAdminData()
+  } catch (err) {
+    setError(err.message || "Could not create manual booking.")
+  }
+}
 
   async function denyBooking(id) {
     setError("")
@@ -1788,7 +1830,109 @@ function AdminPage() {
       <div style={styles.adminGrid}>
         {message ? <div style={styles.successBox}>{message}</div> : null}
         {error ? <div style={styles.errorBox}>{error}</div> : null}
+<section style={styles.adminSection}>
+  <h2 style={styles.adminSectionTitle}>Manual Booking Entry</h2>
 
+  <div style={styles.formGrid}>
+    <label style={styles.label}>
+      Customer Name
+      <input
+        style={styles.input}
+        value={manualBooking.waiverPrintedName}
+        onChange={(e) =>
+          setManualBooking({ ...manualBooking, waiverPrintedName: e.target.value })
+        }
+        placeholder="Customer full name"
+      />
+    </label>
+
+    <label style={styles.label}>
+      Customer Email
+      <input
+        style={styles.input}
+        value={manualBooking.customerEmail}
+        onChange={(e) =>
+          setManualBooking({ ...manualBooking, customerEmail: e.target.value })
+        }
+        placeholder="customer@email.com"
+      />
+    </label>
+
+    <label style={styles.label}>
+      Rental
+      <select
+        style={styles.input}
+        value={manualBooking.rentalLabel}
+        onChange={(e) => {
+          const rentalLabel = e.target.value
+          const boatType =
+            rentalLabel.includes("Jet Ski")
+              ? "Jet Ski"
+              : rentalLabel.includes("Pontoon")
+              ? "Pontoon"
+              : rentalLabel.includes("Bass")
+              ? "Bass Boat"
+              : "All Rentals"
+
+          setManualBooking({ ...manualBooking, rentalLabel, boatType })
+        }}
+      >
+        <option value="Jet Ski (Single)">Jet Ski (Single)</option>
+        <option value="Jet Ski (Double)">Jet Ski (Double)</option>
+        <option value="Pontoon - Half Day">Pontoon - Half Day</option>
+        <option value="Pontoon - Full Day">Pontoon - Full Day</option>
+        <option value="Bass Boat - Full Day">Bass Boat - Full Day</option>
+      </select>
+    </label>
+
+    <label style={styles.label}>
+      Date
+      <input
+        style={styles.input}
+        type="date"
+        value={manualBooking.date}
+        onChange={(e) =>
+          setManualBooking({ ...manualBooking, date: e.target.value })
+        }
+      />
+    </label>
+
+    <label style={styles.label}>
+      Time
+      <input
+        style={styles.input}
+        value={manualBooking.rentalTime}
+        onChange={(e) =>
+          setManualBooking({ ...manualBooking, rentalTime: e.target.value })
+        }
+        placeholder="08:00 AM"
+      />
+    </label>
+
+    <label style={styles.label}>
+      Tow Location
+      <select
+        style={styles.input}
+        value={manualBooking.towLocation}
+        onChange={(e) =>
+          setManualBooking({ ...manualBooking, towLocation: e.target.value })
+        }
+      >
+        <option value="None">None</option>
+        <option value="Castaic">Castaic</option>
+        <option value="Pyramid">Pyramid</option>
+      </select>
+    </label>
+  </div>
+
+  <button
+    type="button"
+    style={styles.adminSuccessButton}
+    onClick={createManualBooking}
+  >
+    Create Manual Booking
+  </button>
+</section>
         <section style={styles.adminCard}>
           <h2 style={styles.adminSectionTitle}>Bookings</h2>
 
