@@ -4709,64 +4709,224 @@ app.post("/api/admin/lake-contacts", requireAdminLogin, async (req, res) => {
   }
 })
 
-app.post("/api/admin/bookings/manual", requireAdminLogin, (req, res) => {
+app.post("/api/admin/bookings/manual", requireAdminLogin, async (req, res) => {
   const {
+    bookingId,
     rentalLabel,
     boatType,
     date,
     rentalTime,
     towLocation,
     customerEmail,
-    waiverPrintedName
-  } = req.body;
+    waiverPrintedName,
+  } = req.body
 
-  if (!rentalLabel || !date || !customerEmail) {
-    return res.status(400).json({ error: "Missing required fields" });
+  if (!bookingId || !rentalLabel || !date || !customerEmail || !waiverPrintedName) {
+    return res.status(400).json({
+      error: "Booking ID, customer name, email, rental, and date are required.",
+    })
   }
 
-  const id = Date.now().toString();
+  try {
+    const existing = await getAsync(`SELECT id FROM bookings WHERE id = ?`, [bookingId])
 
-  db.run(
-    `INSERT INTO bookings (
-      id,
-      rentalLabel,
-      boatType,
-      date,
-      rentalTime,
-      towLocation,
-      customerEmail,
-      waiverPrintedName,
-      status,
-      paymentStatus,
-      depositStatus,
-      waiverStatus,
-      createdAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      rentalLabel,
-      boatType || "",
-      date,
-      rentalTime || "",
-      towLocation || "None",
-      customerEmail,
-      waiverPrintedName || "",
-      "approved_unpaid",
-      "unpaid",
-      "not_scheduled",
-      "not_started",
-      new Date().toISOString()
-    ],
-    function (err) {
-      if (err) {
-        console.error("Manual booking error:", err);
-        return res.status(500).json({ error: "Failed to create booking" });
-      }
-
-      res.json({ success: true, bookingId: id });
+    if (existing) {
+      return res.status(409).json({
+        error: `Booking ID ${bookingId} already exists.`,
+      })
     }
-  );
-});
+
+    await runAsync(
+      `
+      INSERT INTO bookings (
+        id,
+        userId,
+        rentalLabel,
+        boatType,
+        date,
+        rentalTime,
+        towLocation,
+        towFee,
+        waiverPrintedName,
+        waiverAccepted,
+        waiverStatus,
+        paymentStatus,
+        status,
+        customerEmail,
+        photoIdPath,
+        createdAt,
+        depositStatus
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        Number(bookingId),
+        "1",
+        normalizeRentalLabel(rentalLabel),
+        boatType || rentalBoatType(rentalLabel),
+        date,
+        rentalTime || "08:00 AM",
+        towLocation || "None",
+        towFeeForLocation(towLocation || "None"),
+        waiverPrintedName,
+        0,
+        "not_started",
+        "unpaid",
+        "approved_unpaid",
+        normalizeEmail(customerEmail),
+        null,
+        new Date().toISOString(),
+        "not_scheduled",
+      ]
+    )
+
+    return res.json({
+      success: true,
+      bookingId: Number(bookingId),
+    })
+  } catch (err) {
+    console.error("MANUAL BOOKING CREATE ERROR:", err)
+    return res.status(500).json({ error: "Could not create manual booking." })
+  }
+})
+app.post("/api/admin/bookings/:id/send-rental-charge", requireAdminLogin, async (req, res) => {
+  try {
+    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
+
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found." })
+    }
+
+    if (!booking.customerEmail) {
+      return res.status(400).json({ error: "Booking does not have a customer email." })
+    }
+
+    const paymentUrl = formatPaymentUrl(booking.id)
+    const amounts = await calculateBookingAmounts(booking)
+
+    await sendEmail({
+      to: booking.customerEmail,
+      subject: `Rental payment link for booking #${booking.id}`,
+      text: `
+Your Cleared to Cruise rental payment link is ready.
+
+Booking ID: ${booking.id}
+Rental: ${booking.rentalLabel || "Boat Rental"}
+Date: ${booking.date || "Not provided"}
+Time: ${booking.rentalTime || "Not provided"}
+Total: $${dollarsFromCents(amounts.totalAmount)} + fuel
+
+Pay here:
+${paymentUrl}
+      `.trim(),
+      html: `
+        <h2>Rental payment link</h2>
+        <p><strong>Booking ID:</strong> ${booking.id}</p>
+        <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
+        <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
+        <p><strong>Time:</strong> ${escapeHtml(booking.rentalTime || "Not provided")}</p>
+        <p><strong>Total:</strong> $${escapeHtml(dollarsFromCents(amounts.totalAmount))} + fuel</p>
+        <p>
+          <a href="${paymentUrl}" style="display:inline-block;padding:12px 18px;background:#0f2233;color:white;text-decoration:none;border-radius:8px;font-weight:bold;">
+            Pay Rental Now
+          </a>
+        </p>
+      `,
+    })
+
+    await sendEmail({
+      to: ADMIN_NOTIFICATION_EMAIL,
+      subject: `Rental charge email sent for booking #${booking.id}`,
+      text: `
+Rental charge email was sent.
+
+Booking ID: ${booking.id}
+Customer: ${booking.waiverPrintedName || "No name"}
+Email: ${booking.customerEmail}
+Rental: ${booking.rentalLabel || "Boat Rental"}
+Date: ${booking.date || "Not provided"}
+      `.trim(),
+    })
+
+    return res.json({ success: true, message: "Rental charge email sent." })
+  } catch (err) {
+    console.error("SEND RENTAL CHARGE ERROR:", err)
+    return res.status(500).json({ error: "Could not send rental charge email." })
+  }
+})
+
+app.post("/api/admin/bookings/:id/send-deposit-charge", requireAdminLogin, async (req, res) => {
+  try {
+    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
+
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found." })
+    }
+
+    if (!booking.customerEmail) {
+      return res.status(400).json({ error: "Booking does not have a customer email." })
+    }
+
+    const depositUrl = formatDepositRequestUrl(booking.id)
+
+    await sendEmail({
+      to: booking.customerEmail,
+      subject: `Security deposit authorization for booking #${booking.id}`,
+      text: `
+Your refundable $500 security deposit authorization is ready.
+
+Booking ID: ${booking.id}
+Rental: ${booking.rentalLabel || "Boat Rental"}
+Date: ${booking.date || "Not provided"}
+
+Authorize deposit here:
+${depositUrl}
+      `.trim(),
+      html: `
+        <h2>Security deposit authorization</h2>
+        <p>Your refundable <strong>$500 security deposit authorization</strong> is ready.</p>
+        <p><strong>Booking ID:</strong> ${booking.id}</p>
+        <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
+        <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
+        <p>
+          <a href="${depositUrl}" style="display:inline-block;padding:12px 18px;background:#0f2233;color:white;text-decoration:none;border-radius:8px;font-weight:bold;">
+            Authorize Deposit
+          </a>
+        </p>
+      `,
+    })
+
+    await runAsync(
+      `
+      UPDATE bookings
+      SET depositRequestedAt = datetime('now'),
+          depositLinkSentAt = datetime('now'),
+          depositStatus = 'requested'
+      WHERE id = ?
+      `,
+      [booking.id]
+    )
+
+    await sendEmail({
+      to: ADMIN_NOTIFICATION_EMAIL,
+      subject: `Deposit charge email sent for booking #${booking.id}`,
+      text: `
+Deposit authorization email was sent.
+
+Booking ID: ${booking.id}
+Customer: ${booking.waiverPrintedName || "No name"}
+Email: ${booking.customerEmail}
+Rental: ${booking.rentalLabel || "Boat Rental"}
+Date: ${booking.date || "Not provided"}
+      `.trim(),
+    })
+
+    return res.json({ success: true, message: "Deposit charge email sent." })
+  } catch (err) {
+    console.error("SEND DEPOSIT CHARGE ERROR:", err)
+    return res.status(500).json({ error: "Could not send deposit charge email." })
+  }
+})
 
 // -----------------------------
 // UPDATED RENTAL PACKET BUILDERS

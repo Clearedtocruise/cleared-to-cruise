@@ -1014,7 +1014,8 @@ function AdminPage() {
   const [editCustomerEmail, setEditCustomerEmail] = useState("")
   const [editPrintedName, setEditPrintedName] = useState("")
   const [editStatus, setEditStatus] = useState("pending_approval")
-  const [manualBooking, setManualBooking] = useState({
+const [manualBooking, setManualBooking] = useState({
+  bookingId: "",
   waiverPrintedName: "",
   customerEmail: "",
   rentalLabel: "Jet Ski (Single)",
@@ -1690,7 +1691,49 @@ async function createManualBooking() {
       setMessage("")
     }
   }
+async function sendRentalCharge(id) {
+  try {
+    setError("")
+    setMessage("Sending rental charge email...")
 
+    const res = await adminFetch(`/api/admin/bookings/${id}/send-rental-charge`, {
+      method: "POST",
+    })
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      throw new Error(data.error || "Could not send rental charge.")
+    }
+
+    setMessage(data.message || "Rental charge email sent.")
+    await loadAdminData()
+  } catch (err) {
+    setError(err.message || "Could not send rental charge.")
+  }
+}
+
+async function sendDepositCharge(id) {
+  try {
+    setError("")
+    setMessage("Sending deposit charge email...")
+
+    const res = await adminFetch(`/api/admin/bookings/${id}/send-deposit-charge`, {
+      method: "POST",
+    })
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      throw new Error(data.error || "Could not send deposit charge.")
+    }
+
+    setMessage(data.message || "Deposit charge email sent.")
+    await loadAdminData()
+  } catch (err) {
+    setError(err.message || "Could not send deposit charge.")
+  }
+}
   async function savePricingSettings() {
     setError("")
     setMessage("Saving pricing settings...")
@@ -1834,6 +1877,20 @@ async function createManualBooking() {
   <h2 style={styles.adminSectionTitle}>Manual Booking Entry</h2>
 
   <div style={styles.formGrid}>
+    <label style={styles.label}>
+  Booking ID
+  <input
+    style={styles.input}
+    value={manualBooking.bookingId}
+    onChange={(e) =>
+      setManualBooking({
+        ...manualBooking,
+        bookingId: e.target.value,
+      })
+    }
+    placeholder="Existing booking ID"
+  />
+</label>
     <label style={styles.label}>
       Customer Name
       <input
@@ -2156,6 +2213,21 @@ async function createManualBooking() {
                             >
                               Damage
                             </button>
+                            <button
+  type="button"
+  style={styles.adminPrimaryButton}
+  onClick={() => sendRentalCharge(booking.id)}
+>
+  Rental Email
+</button>
+
+<button
+  type="button"
+  style={styles.adminSmallButton}
+  onClick={() => sendDepositCharge(booking.id)}
+>
+  Deposit Email
+</button>
                             <button
                               type="button"
                               style={styles.adminDangerButton}
