@@ -3632,6 +3632,13 @@ app.get("/debug/testimonials", async (req, res) => {
     res.json({ error: err.message })
   }
 })
+app.options("/api/admin/bookings/manual", (req, res) => {
+  res.header("Access-Control-Allow-Origin", req.headers.origin || "*")
+  res.header("Access-Control-Allow-Credentials", "true")
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+  res.header("Access-Control-Allow-Methods", "POST, OPTIONS")
+  return res.sendStatus(204)
+})
 app.post("/api/admin/bookings/manual", requireAdminLogin, async (req, res) => {
   const {
     bookingId,
