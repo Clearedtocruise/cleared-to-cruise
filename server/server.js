@@ -3690,7 +3690,7 @@ if (!rentalLabel || !date || !customerEmail || !waiverPrintedName) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
-        Number(bookingId),
+bookingId ? Number(bookingId) : Date.now(),
         "1",
         normalizeRentalLabel(rentalLabel),
         boatType || rentalBoatType(rentalLabel),
