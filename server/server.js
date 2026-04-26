@@ -3632,12 +3632,18 @@ app.get("/debug/testimonials", async (req, res) => {
     res.json({ error: err.message })
   }
 })
+app.post("/api/admin/bookings/manual-test", async (req, res) => {
+  return res.json({ success: true, message: "manual test route works" })
+})
 app.options("/api/admin/bookings/manual", (req, res) => {
   res.header("Access-Control-Allow-Origin", req.headers.origin || "*")
   res.header("Access-Control-Allow-Credentials", "true")
   res.header("Access-Control-Allow-Headers", "Content-Type, Authorization")
   res.header("Access-Control-Allow-Methods", "POST, OPTIONS")
   return res.sendStatus(204)
+})
+app.post("/api/admin/bookings/manual-test", async (req, res) => {
+  return res.json({ success: true, message: "manual test route works" })
 })
 app.post("/api/admin/bookings/manual", requireAdminLogin, async (req, res) => {
   const {
