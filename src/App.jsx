@@ -1224,10 +1224,13 @@ async function createManualBooking() {
     setMessage("")
     setError("")
 
-    const res = await adminFetch("/api/admin/bookings/manual", {
-      method: "POST",
-      body: JSON.stringify(manualBooking),
-    })
+const res = await adminFetch("/api/admin/bookings/manual", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(manualBooking),
+})
 
     const data = await res.json().catch(() => ({}))
 
