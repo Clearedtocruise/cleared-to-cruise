@@ -1223,6 +1223,7 @@ async function createManualBooking() {
   try {
     setMessage("")
     setError("")
+console.log("SENDING MANUAL BOOKING:", manualBooking)
 
 const res = await adminFetch("/api/admin/bookings/manual", {
   method: "POST",
