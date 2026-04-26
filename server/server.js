@@ -3651,11 +3651,11 @@ app.post("/api/admin/bookings/manual", requireAdminLogin, async (req, res) => {
     waiverPrintedName,
   } = req.body
 
-  if (!bookingId || !rentalLabel || !date || !customerEmail || !waiverPrintedName) {
-    return res.status(400).json({
-      error: "Booking ID, customer name, email, rental, and date are required.",
-    })
-  }
+if (!rentalLabel || !date || !customerEmail || !waiverPrintedName) {
+  return res.status(400).json({
+    error: "Customer name, email, rental, and date are required.",
+  })
+}
 
   try {
     const existing = await getAsync(`SELECT id FROM bookings WHERE id = ?`, [bookingId])
