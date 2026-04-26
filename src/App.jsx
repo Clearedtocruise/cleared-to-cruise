@@ -360,7 +360,7 @@ async function adminFetch(path, options = {}) {
   }
 
   if (token) {
-    headers.Authorization = `Basic ${token}`
+    headers.Authorization = token
   }
 
   const response = await fetch(`${API}${path}`, {
