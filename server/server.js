@@ -3632,6 +3632,86 @@ app.get("/debug/testimonials", async (req, res) => {
     res.json({ error: err.message })
   }
 })
+app.post("/api/admin/bookings/manual", requireAdminLogin, async (req, res) => {
+  const {
+    bookingId,
+    rentalLabel,
+    boatType,
+    date,
+    rentalTime,
+    towLocation,
+    customerEmail,
+    waiverPrintedName,
+  } = req.body
+
+  if (!bookingId || !rentalLabel || !date || !customerEmail || !waiverPrintedName) {
+    return res.status(400).json({
+      error: "Booking ID, customer name, email, rental, and date are required.",
+    })
+  }
+
+  try {
+    const existing = await getAsync(`SELECT id FROM bookings WHERE id = ?`, [bookingId])
+
+    if (existing) {
+      return res.status(409).json({
+        error: `Booking ID ${bookingId} already exists.`,
+      })
+    }
+
+    await runAsync(
+      `
+      INSERT INTO bookings (
+        id,
+        userId,
+        rentalLabel,
+        boatType,
+        date,
+        rentalTime,
+        towLocation,
+        towFee,
+        waiverPrintedName,
+        waiverAccepted,
+        waiverStatus,
+        paymentStatus,
+        status,
+        customerEmail,
+        photoIdPath,
+        createdAt,
+        depositStatus
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        Number(bookingId),
+        "1",
+        normalizeRentalLabel(rentalLabel),
+        boatType || rentalBoatType(rentalLabel),
+        date,
+        rentalTime || "08:00 AM",
+        towLocation || "None",
+        towFeeForLocation(towLocation || "None"),
+        waiverPrintedName,
+        0,
+        "not_started",
+        "unpaid",
+        "approved_unpaid",
+        normalizeEmail(customerEmail),
+        null,
+        new Date().toISOString(),
+        "not_scheduled",
+      ]
+    )
+
+    return res.json({
+      success: true,
+      bookingId: Number(bookingId),
+    })
+  } catch (err) {
+    console.error("MANUAL BOOKING CREATE ERROR:", err)
+    return res.status(500).json({ error: "Could not create manual booking." })
+  }
+})
 // -----------------------------
 // START
 // -----------------------------
@@ -4709,86 +4789,6 @@ app.post("/api/admin/lake-contacts", requireAdminLogin, async (req, res) => {
   }
 })
 
-app.post("/api/admin/bookings/manual", requireAdminLogin, async (req, res) => {
-  const {
-    bookingId,
-    rentalLabel,
-    boatType,
-    date,
-    rentalTime,
-    towLocation,
-    customerEmail,
-    waiverPrintedName,
-  } = req.body
-
-  if (!bookingId || !rentalLabel || !date || !customerEmail || !waiverPrintedName) {
-    return res.status(400).json({
-      error: "Booking ID, customer name, email, rental, and date are required.",
-    })
-  }
-
-  try {
-    const existing = await getAsync(`SELECT id FROM bookings WHERE id = ?`, [bookingId])
-
-    if (existing) {
-      return res.status(409).json({
-        error: `Booking ID ${bookingId} already exists.`,
-      })
-    }
-
-    await runAsync(
-      `
-      INSERT INTO bookings (
-        id,
-        userId,
-        rentalLabel,
-        boatType,
-        date,
-        rentalTime,
-        towLocation,
-        towFee,
-        waiverPrintedName,
-        waiverAccepted,
-        waiverStatus,
-        paymentStatus,
-        status,
-        customerEmail,
-        photoIdPath,
-        createdAt,
-        depositStatus
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        Number(bookingId),
-        "1",
-        normalizeRentalLabel(rentalLabel),
-        boatType || rentalBoatType(rentalLabel),
-        date,
-        rentalTime || "08:00 AM",
-        towLocation || "None",
-        towFeeForLocation(towLocation || "None"),
-        waiverPrintedName,
-        0,
-        "not_started",
-        "unpaid",
-        "approved_unpaid",
-        normalizeEmail(customerEmail),
-        null,
-        new Date().toISOString(),
-        "not_scheduled",
-      ]
-    )
-
-    return res.json({
-      success: true,
-      bookingId: Number(bookingId),
-    })
-  } catch (err) {
-    console.error("MANUAL BOOKING CREATE ERROR:", err)
-    return res.status(500).json({ error: "Could not create manual booking." })
-  }
-})
 app.post("/api/admin/bookings/:id/send-rental-charge", requireAdminLogin, async (req, res) => {
   try {
     const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
