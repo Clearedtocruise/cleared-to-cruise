@@ -1692,11 +1692,10 @@ app.post("/api/bookings/waiver", upload.single("photoId"), async (req, res) => {
         "not_scheduled",
       ]
     )
-
-    const bookingId = result.lastID
+const bookingId = result.lastID
 
 try {
-  await syncBookingToSupabaseById(Id)
+  await syncBookingToSupabaseById(bookingId)
 } catch (err) {
   console.error("SUPABASE SYNC ERROR:", err)
 }
@@ -1713,44 +1712,15 @@ const bookingForEmail = {
   status: "pending_approval",
 }
 
- sendAdminApprovalEmail(bookingForEmail).catch((emailErr) => {
-      console.error("ADMIN APPROVAL EMAIL ERROR:", emailErr)
-    })
+sendAdminApprovalEmail(bookingForEmail).catch((emailErr) => {
+  console.error("ADMIN APPROVAL EMAIL ERROR:", emailErr)
+})
 
-    Promise.allSettled([
-      sendEmail({
-        to: ADMIN_NOTIFICATION_EMAIL,
-        subject: `New booking request #${bookingId}`,
-        text: `
-New booking request received.
-
-Booking ID: ${bookingId}
-Name: ${waiverPrintedName}
-Email: ${normalizedCustomerEmail || "No email provided"}
-Rental: ${rentalLabel}
-Date: ${date}
-Time: ${rentalTime || "Not provided"}
-Tow Location: ${towLocation || "None"}
-Photo ID Path: /uploads/${req.file.filename}
-        `.trim(),
-        html: `
-          <h2>New booking request received</h2>
-          <p><strong>Booking ID:</strong> ${bookingId}</p>
-          <p><strong>Name:</strong> ${escapeHtml(waiverPrintedName)}</p>
-          <p><strong>Email:</strong> ${escapeHtml(normalizedCustomerEmail || "No email provided")}</p>
-          <p><strong>Rental:</strong> ${escapeHtml(rentalLabel)}</p>
-          <p><strong>Date:</strong> ${escapeHtml(date)}</p>
-          <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
-          <p><strong>Tow Location:</strong> ${escapeHtml(towLocation || "None")}</p>
-          <p><strong>Photo ID Path:</strong> /uploads/${escapeHtml(req.file.filename)}</p>
-        `,
-        attachments: bookingPhotoAttachment(`./uploads/${req.file.filename}`),
-      }),
-      normalizedCustomerEmail
-        ? sendEmail({
-            to: normalizedCustomerEmail,
-            subject: `Cleared to Cruise booking request #${bookingId} received`,
-            text: `
+if (normalizedCustomerEmail) {
+  sendEmail({
+    to: normalizedCustomerEmail,
+    subject: `Cleared to Cruise booking request #${bookingId} received`,
+    text: `
 Your booking request has been received.
 
 Booking ID: ${bookingId}
@@ -1762,28 +1732,20 @@ Tow Location: ${towLocation || "None"}
 You can check your status later with:
 Booking ID: ${bookingId}
 Email: ${normalizedCustomerEmail}
-            `.trim(),
-            html: `
-              <h2>Your booking request has been received</h2>
-              <p><strong>Booking ID:</strong> ${bookingId}</p>
-              <p><strong>Rental:</strong> ${escapeHtml(rentalLabel)}</p>
-              <p><strong>Date:</strong> ${escapeHtml(date)}</p>
-              <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
-              <p><strong>Tow Location:</strong> ${escapeHtml(towLocation || "None")}</p>
-              <p>You can check your status later using your booking ID and email.</p>
-            `,
-          })
-        : Promise.resolve(),
-    ]).then((results) => {
-      results.forEach((resultItem, index) => {
-        if (resultItem.status === "rejected") {
-          console.error(
-            index === 0 ? "ADMIN BOOKING EMAIL ERROR:" : "CUSTOMER BOOKING EMAIL ERROR:",
-            resultItem.reason
-          )
-        }
-      })
-    })
+    `.trim(),
+    html: `
+      <h2>Your booking request has been received</h2>
+      <p><strong>Booking ID:</strong> ${bookingId}</p>
+      <p><strong>Rental:</strong> ${escapeHtml(rentalLabel)}</p>
+      <p><strong>Date:</strong> ${escapeHtml(date)}</p>
+      <p><strong>Time:</strong> ${escapeHtml(rentalTime || "Not provided")}</p>
+      <p><strong>Tow Location:</strong> ${escapeHtml(towLocation || "None")}</p>
+      <p>You can check your status later using your booking ID and email.</p>
+    `,
+  }).catch((emailErr) => {
+    console.error("CUSTOMER BOOKING EMAIL ERROR:", emailErr)
+  })
+}
 
     return res.json({ success: true, bookingId })
   } catch (err) {
@@ -2182,10 +2144,12 @@ async function approveBookingCore(id) {
     return { notFound: true }
   }
 
-  await runAsync(`UPDATE bookings SET status = 'approved_unpaid' WHERE id = ?`, [id])
-  const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+ await runAsync(`UPDATE bookings SET status = 'approved_unpaid' WHERE id = ?`, [id])
+
+const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+
 try {
-  await syncBookingToSupabaseById(bookingId)
+  await syncBookingToSupabaseById(id)
 } catch (err) {
   console.error("SUPABASE SYNC ERROR:", err)
 }
@@ -3624,17 +3588,6 @@ app.get("/api/admin/jobs-status", requireAdminLogin, async (_req, res) => {
   }
 })
 
-app.get("/debug/testimonials", async (req, res) => {
-  try {
-    const rows = await allAsync(`SELECT * FROM testimonials`)
-    res.json(rows)
-  } catch (err) {
-    res.json({ error: err.message })
-  }
-})
-app.post("/api/admin/bookings/manual-test", async (req, res) => {
-  return res.json({ success: true, message: "manual test route works" })
-})
 app.options("/api/admin/bookings/manual", (req, res) => {
   res.header("Access-Control-Allow-Origin", req.headers.origin || "*")
   res.header("Access-Control-Allow-Credentials", "true")
@@ -3642,14 +3595,10 @@ app.options("/api/admin/bookings/manual", (req, res) => {
   res.header("Access-Control-Allow-Methods", "POST, OPTIONS")
   return res.sendStatus(204)
 })
-app.post("/api/admin/bookings/manual-test", async (req, res) => {
-  return res.json({ success: true, message: "manual test route works" })
-})
 app.post("/api/admin/bookings/manual", requireAdminLogin, async (req, res) => {
   const {
     bookingId,
     rentalLabel,
-    boatType,
     date,
     rentalTime,
     towLocation,
@@ -3657,68 +3606,101 @@ app.post("/api/admin/bookings/manual", requireAdminLogin, async (req, res) => {
     waiverPrintedName,
   } = req.body
 
-if (!rentalLabel || !date || !customerEmail || !waiverPrintedName) {
-  return res.status(400).json({
-    error: "Customer name, email, rental, and date are required.",
-  })
-}
+  if (!rentalLabel || !date || !customerEmail || !waiverPrintedName) {
+    return res.status(400).json({
+      error: "Customer name, email, rental, and date are required.",
+    })
+  }
+
+  const normalizedRentalLabel = normalizeRentalLabel(rentalLabel)
+  const boatType = rentalBoatType(normalizedRentalLabel)
+  const normalizedCustomerEmail = normalizeEmail(customerEmail)
+  const createdAt = new Date().toISOString()
+  const manualId = String(bookingId || "").trim()
 
   try {
-    const existing = await getAsync(`SELECT id FROM bookings WHERE id = ?`, [bookingId])
+    let result
 
-    if (existing) {
-      return res.status(409).json({
-        error: `Booking ID ${bookingId} already exists.`,
-      })
+    if (manualId) {
+      const existing = await getAsync(`SELECT id FROM bookings WHERE id = ?`, [manualId])
+
+      if (existing) {
+        return res.status(409).json({
+          error: `Booking ID ${manualId} already exists.`,
+        })
+      }
+
+      result = await runAsync(
+        `
+        INSERT INTO bookings (
+          id, userId, rentalLabel, boatType, date, rentalTime, towLocation, towFee,
+          waiverPrintedName, waiverAccepted, waiverStatus, paymentStatus, status,
+          customerEmail, photoIdPath, createdAt, depositStatus
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          Number(manualId),
+          "1",
+          normalizedRentalLabel,
+          boatType,
+          date,
+          rentalTime || "08:00 AM",
+          towLocation || "None",
+          towFeeForLocation(towLocation || "None"),
+          waiverPrintedName,
+          1,
+          "signed",
+          "unpaid",
+          "approved_unpaid",
+          normalizedCustomerEmail,
+          null,
+          createdAt,
+          "not_scheduled",
+        ]
+      )
+    } else {
+      result = await runAsync(
+        `
+        INSERT INTO bookings (
+          userId, rentalLabel, boatType, date, rentalTime, towLocation, towFee,
+          waiverPrintedName, waiverAccepted, waiverStatus, paymentStatus, status,
+          customerEmail, photoIdPath, createdAt, depositStatus
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          "1",
+          normalizedRentalLabel,
+          boatType,
+          date,
+          rentalTime || "08:00 AM",
+          towLocation || "None",
+          towFeeForLocation(towLocation || "None"),
+          waiverPrintedName,
+          1,
+          "signed",
+          "unpaid",
+          "approved_unpaid",
+          normalizedCustomerEmail,
+          null,
+          createdAt,
+          "not_scheduled",
+        ]
+      )
     }
 
-    await runAsync(
-      `
-      INSERT INTO bookings (
-        id,
-        userId,
-        rentalLabel,
-        boatType,
-        date,
-        rentalTime,
-        towLocation,
-        towFee,
-        waiverPrintedName,
-        waiverAccepted,
-        waiverStatus,
-        paymentStatus,
-        status,
-        customerEmail,
-        photoIdPath,
-        createdAt,
-        depositStatus
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-bookingId ? Number(bookingId) : Date.now(),
-        "1",
-        normalizeRentalLabel(rentalLabel),
-        boatType || rentalBoatType(rentalLabel),
-        date,
-        rentalTime || "08:00 AM",
-        towLocation || "None",
-        towFeeForLocation(towLocation || "None"),
-        waiverPrintedName,
-        0,
-        "not_started",
-        "unpaid",
-        "approved_unpaid",
-        normalizeEmail(customerEmail),
-        null,
-        new Date().toISOString(),
-        "not_scheduled",
-      ]
-    )
+    const newBookingId = manualId ? Number(manualId) : result.lastID
+
+    try {
+      await syncBookingToSupabaseById(newBookingId)
+    } catch (err) {
+      console.error("SUPABASE SYNC ERROR:", err)
+    }
 
     return res.json({
       success: true,
-      bookingId: Number(bookingId),
+      bookingId: newBookingId,
     })
   } catch (err) {
     console.error("MANUAL BOOKING CREATE ERROR:", err)
