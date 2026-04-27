@@ -3595,7 +3595,7 @@ app.options("/api/admin/manual-booking", (req, res) => {
   res.header("Access-Control-Allow-Methods", "POST, OPTIONS")
   return res.sendStatus(204)
 })
-app.post("/api/admin/bookings/manual", requireAdminLogin, async (req, res) => {
+app.post("/api/admin/manual-booking", requireAdminLogin, async (req, res) => {
   const {
     bookingId,
     rentalLabel,

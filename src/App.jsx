@@ -1223,7 +1223,7 @@ async function createManualBooking() {
   try {
     setMessage("")
     setError("")
-const res = await adminFetch("/api/admin/bookings/manual-booking", {
+const res = await adminFetch("/api/admin/manual-booking", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
