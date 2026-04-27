@@ -4883,19 +4883,21 @@ ${paymentUrl}
       `,
     })
 
-    await sendEmail({
-      to: ADMIN_NOTIFICATION_EMAIL,
-      subject: `Rental charge email sent for booking #${booking.id}`,
-      text: `
+await sendEmail({
+  to: ADMIN_NOTIFICATION_EMAIL,
+  subject: `Rental charge email sent for booking #${booking.id}`,
+  text: `
 Rental charge email was sent.
 
 Booking ID: ${booking.id}
 Customer: ${booking.waiverPrintedName || "No name"}
 Email: ${booking.customerEmail}
 Rental: ${booking.rentalLabel || "Boat Rental"}
+Amount Charged: $${dollarsFromCents(amounts.totalAmount)} + fuel
 Date: ${booking.date || "Not provided"}
-      `.trim(),
-    })
+Time: ${booking.rentalTime || "Not provided"}
+  `.trim(),
+})
 
     return res.json({ success: true, message: "Rental charge email sent." })
   } catch (err) {
