@@ -1240,6 +1240,7 @@ const res = await adminFetch("/api/admin/bookings/manual", {
     setMessage(`Manual booking created. Booking ID: ${data.bookingId}`)
 
     setManualBooking({
+      bookingId: "",
       waiverPrintedName: "",
       customerEmail: "",
       rentalLabel: "Jet Ski (Single)",
