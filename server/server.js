@@ -3726,6 +3726,26 @@ app.post("/api/admin/manual-booking", requireAdminLogin, async (req, res) => {
     return res.status(500).json({ error: "Could not create manual booking." })
   }
 })
+app.delete("/api/admin/bookings/:id", requireAdminLogin, async (req, res) => {
+  try {
+    const result = await runAsync(`DELETE FROM bookings WHERE id = ?`, [req.params.id])
+
+    if (result.changes === 0) {
+      return res.status(404).json({ error: "Booking not found." })
+    }
+
+    try {
+      await syncBookingToSupabaseById(req.params.id)
+    } catch (err) {
+      console.error("SUPABASE SYNC ERROR AFTER DELETE:", err)
+    }
+
+    return res.json({ success: true, message: "Booking deleted." })
+  } catch (err) {
+    console.error("DELETE BOOKING ERROR:", err)
+    return res.status(500).json({ error: "Could not delete booking." })
+  }
+})
 // -----------------------------
 // START
 // -----------------------------
