@@ -2080,38 +2080,57 @@ async function sendStatusEmails(booking, newStatus) {
   const paymentUrl = formatPaymentUrl(booking.id)
 
   try {
-    if (booking.customerEmail) {
-      await sendEmail({
-        to: booking.customerEmail,
-        subject: `Booking #${booking.id} status updated: ${readableStatus}`,
-        text: `
-Your booking status has been updated.
+ if (booking.customerEmail) {
+  await sendEmail({
+    to: booking.customerEmail,
+    subject: `Booking #${booking.id} approved — payment required`,
+    text: `
+Good news. Your booking has been approved.
 
 Booking ID: ${booking.id}
 Rental: ${booking.rentalLabel || "Boat Rental"}
 Date: ${booking.date || "Not provided"}
-Status: ${readableStatus}
+Time: ${booking.rentalTime || "Not provided"}
 
-${
-  newStatus === "approved_unpaid"
-    ? `Your booking has been approved. Pay here:\n${paymentUrl}`
-    : ""
+Important: Your rental date is not secured until payment is received.
+
+A refundable $500 security deposit authorization request will be emailed approximately 3 days before your rental date. If your rental date is within 3 days, the request will be sent immediately after approval.
+
+Payment link:
+${paymentUrl}
+
+Thank you,
+Cleared to Cruise Rentals
+    `.trim(),
+    html: `
+      <h2>Your booking has been approved</h2>
+      <p>Good news. Your booking has been approved.</p>
+      <p><strong>Booking ID:</strong> ${booking.id}</p>
+      <p><strong>Rental:</strong> ${booking.rentalLabel || "Boat Rental"}</p>
+      <p><strong>Date:</strong> ${booking.date || "Not provided"}</p>
+      <p><strong>Time:</strong> ${booking.rentalTime || "Not provided"}</p>
+      <p><strong>Important:</strong> Your rental date is not secured until payment is received.</p>
+      <p>A refundable <strong>$500 security deposit authorization request</strong> will be emailed approximately <strong>3 days before your rental date</strong>. If your rental date is within 3 days, the request will be sent immediately after approval.</p>
+      <p><a href="${paymentUrl}">Complete Payment</a></p>
+      <p>Thank you,<br/>Cleared to Cruise Rentals</p>
+    `,
+  })
+
+  await sendEmail({
+    to: ADMIN_NOTIFICATION_EMAIL,
+    subject: `Rental payment request sent for booking #${booking.id}`,
+    text: `
+Rental payment request email was successfully sent.
+
+Booking ID: ${booking.id}
+Customer: ${booking.waiverPrintedName || "No name"}
+Email: ${booking.customerEmail}
+Rental: ${booking.rentalLabel || "Boat Rental"}
+Date: ${booking.date || "Not provided"}
+Time: ${booking.rentalTime || "Not provided"}
+    `.trim(),
+  })
 }
-        `.trim(),
-        html: `
-          <h2>Booking status updated</h2>
-          <p><strong>Booking ID:</strong> ${booking.id}</p>
-          <p><strong>Rental:</strong> ${escapeHtml(booking.rentalLabel || "Boat Rental")}</p>
-          <p><strong>Date:</strong> ${escapeHtml(booking.date || "Not provided")}</p>
-          <p><strong>Status:</strong> ${escapeHtml(readableStatus)}</p>
-          ${
-            newStatus === "approved_unpaid"
-              ? `<p><a href="${paymentUrl}" style="display:inline-block;padding:12px 18px;background:#0f2233;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">Pay Rental Now</a></p>`
-              : ""
-          }
-        `,
-      })
-    }
 
     await sendEmail({
       to: ADMIN_NOTIFICATION_EMAIL,
@@ -3799,20 +3818,35 @@ app.post("/api/admin/bookings/:id/resend-deposit-request", requireAdminLogin, as
     const depositUrl = formatDepositRequestUrl(booking.id)
 
     await sendEmail({
-      to: booking.customerEmail,
-      subject: `Deposit authorization requested for booking #${booking.id}`,
-      text: `
+  to: booking.customerEmail,
+  subject: `Deposit authorization requested for booking #${booking.id}`,
+  text: `
 Please authorize your $500 security deposit card for booking #${booking.id}.
 
 Deposit link:
 ${depositUrl}
-      `.trim(),
-      html: `
-        <h2>Deposit authorization requested</h2>
-        <p>Please authorize your $500 security deposit card for booking #${booking.id}.</p>
-        <p><a href="${depositUrl}">Authorize Deposit</a></p>
-      `,
-    })
+  `.trim(),
+  html: `
+    <h2>Deposit authorization requested</h2>
+    <p>Please authorize your $500 security deposit card for booking #${booking.id}.</p>
+    <p><a href="${depositUrl}">Authorize Deposit</a></p>
+  `,
+})
+
+await sendEmail({
+  to: ADMIN_NOTIFICATION_EMAIL,
+  subject: `Security deposit email sent for booking #${booking.id}`,
+  text: `
+A security deposit request email was successfully sent.
+
+Booking ID: ${booking.id}
+Customer: ${booking.waiverPrintedName || "No name"}
+Email: ${booking.customerEmail}
+Rental: ${normalizeRentalLabel(booking.rentalLabel) || "Boat Rental"}
+Date: ${booking.date || "Not provided"}
+Time: ${booking.rentalTime || "Not provided"}
+  `.trim(),
+})
 
     await runAsync(
       `
