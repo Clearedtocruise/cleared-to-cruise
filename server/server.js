@@ -3588,7 +3588,7 @@ app.get("/api/admin/jobs-status", requireAdminLogin, async (_req, res) => {
   }
 })
 
-app.options("/api/admin/bookings/manual", (req, res) => {
+app.options("/api/admin/manual-booking", (req, res) => {
   res.header("Access-Control-Allow-Origin", req.headers.origin || "*")
   res.header("Access-Control-Allow-Credentials", "true")
   res.header("Access-Control-Allow-Headers", "Content-Type, Authorization")
