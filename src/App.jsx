@@ -2181,42 +2181,55 @@ async function sendDepositCharge(id) {
                             >
                               Approve
                             </button>
-                            <button
-                              type="button"
-                              style={styles.adminDangerButton}
-                              onClick={() => denyBooking(booking.id)}
-                            >
-                              Deny
-                            </button>
-                            <button
-                              type="button"
-                              style={styles.adminPrimaryButton}
-                              onClick={() => markConfirmed(booking.id)}
-                            >
-                              Confirm
-                            </button>
-                            <button
-                              type="button"
-                              style={styles.adminSmallButton}
-                              onClick={() => sendPaymentRequest(booking.id)}
-                            >
-                              Send Pay
-                            </button>
-                            <button
-                              type="button"
-                              style={styles.adminSmallButton}
-                              onClick={() => sendDepositRequest(booking.id)}
-                            >
-                              Deposit
-                            </button>
-                            <button
-                              type="button"
-                              style={styles.adminWarningButton}
-                              onClick={() => chargeDamage(booking.id)}
-                            >
-                              Damage
-                            </button>
-                            <button
+<button
+  type="button"
+  style={styles.adminSuccessButton}
+  onClick={() => approveBooking(booking.id)}
+>
+  Deny
+</button>
+
+<button
+  type="button"
+  style={styles.adminPrimaryButton}
+  onClick={() => markConfirmed(booking.id)}
+>
+  Confirm
+</button>
+
+<button
+  type="button"
+  style={styles.adminSmallButton}
+  onClick={() => sendPaymentRequest(booking.id)}
+>
+  Send Pay
+</button>
+
+<button
+  type="button"
+  style={styles.adminSmallButton}
+  onClick={() => captureDeposit(booking.id)}
+>
+  Capture Deposit
+</button>
+
+<button
+  type="button"
+  style={styles.adminSmallButton}
+  onClick={() => releaseDeposit(booking.id)}
+>
+  Release Deposit
+</button>
+
+<button
+  type="button"
+  style={styles.adminWarningButton}
+  onClick={() => chargeDamage(booking.id)}
+>
+  Damage
+</button>
+
+<button
   type="button"
   style={styles.adminPrimaryButton}
   onClick={() => sendRentalCharge(booking.id)}

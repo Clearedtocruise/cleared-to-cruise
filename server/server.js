@@ -2011,7 +2011,25 @@ app.post("/api/deposit/:id", async (req, res) => {
 // -----------------------------
 app.get("/api/admin/bookings", requireAdminLogin, async (_req, res) => {
   try {
-    const rows = await allAsync(`SELECT * FROM bookings ORDER BY id DESC`)
+    let rows = []
+
+    // Load local SQLite bookings first
+    rows = await allAsync(`SELECT * FROM bookings ORDER BY id DESC`)
+
+    // If SQLite is empty, fall back to Supabase backup
+    if (!rows.length) {
+      const { data, error } = await supabase
+        .from("bookings")
+        .select("*")
+        .order("id", { ascending: false })
+
+      if (error) {
+        console.error("SUPABASE ADMIN BOOKINGS LOAD ERROR:", error)
+      } else if (Array.isArray(data)) {
+        rows = data
+      }
+    }
+
     const enriched = await Promise.all(
       rows.map(async (row) => {
         const normalizedRow = {
@@ -2020,6 +2038,7 @@ app.get("/api/admin/bookings", requireAdminLogin, async (_req, res) => {
         }
 
         const amounts = await calculateBookingAmounts(normalizedRow)
+
         return {
           ...normalizedRow,
           pricing: {
@@ -2033,6 +2052,7 @@ app.get("/api/admin/bookings", requireAdminLogin, async (_req, res) => {
         }
       })
     )
+
     return res.json(enriched)
   } catch (err) {
     console.error("ADMIN BOOKINGS ERROR:", err)
@@ -2469,6 +2489,207 @@ app.post("/api/admin/bookings/:id/confirm", requireAdminLogin, confirmBookingHan
 app.post("/api/admin/deposit-link/:id", requireAdminLogin, depositLinkHandler)
 app.post("/api/admin/bookings/:id/deposit-link", requireAdminLogin, depositLinkHandler)
 app.post("/api/admin/bookings/:id/send-deposit-link", requireAdminLogin, depositLinkHandler)
+app.post("/api/admin/bookings/:id/capture-deposit", requireAdminLogin, async (req, res) => {
+  try {
+    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
+
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found." })
+    }
+
+    if (!booking.depositPaymentIntentId) {
+      return res.status(400).json({ error: "No deposit hold found for this booking." })
+    }
+
+    const amountCents = centsFromDollars(req.body.amount)
+    const reason = String(req.body.reason || "Deposit charge").trim()
+
+    if (!amountCents || amountCents <= 0) {
+      return res.status(400).json({ error: "Capture amount is required." })
+    }
+
+    if (amountCents > 50000) {
+      return res.status(400).json({ error: "Cannot capture more than the $500 deposit." })
+    }
+
+    const intent = await stripe.paymentIntents.capture(booking.depositPaymentIntentId, {
+      amount_to_capture: amountCents,
+    })
+
+    await runAsync(
+      `
+      UPDATE bookings
+      SET depositStatus = 'partially_captured',
+          depositAmountCaptured = ?,
+          depositReleasedAt = datetime('now')
+      WHERE id = ?
+      `,
+      [amountCents, booking.id]
+    )
+
+    await sendEmail({
+      to: booking.customerEmail,
+      subject: `Security deposit charge for booking #${booking.id}`,
+      text: `
+A portion of your refundable security deposit was used.
+
+Booking ID: ${booking.id}
+Amount captured: $${dollarsFromCents(amountCents)}
+Reason: ${reason}
+
+The remaining authorization balance will be released by your card issuer.
+      `.trim(),
+    })
+
+    await sendEmail({
+      to: ADMIN_NOTIFICATION_EMAIL,
+      subject: `Deposit captured for booking #${booking.id}`,
+      text: `
+Deposit capture completed.
+
+Booking ID: ${booking.id}
+Customer: ${booking.waiverPrintedName || "No name"}
+Email: ${booking.customerEmail || "No email"}
+Amount captured: $${dollarsFromCents(amountCents)}
+Reason: ${reason}
+      `.trim(),
+    })
+
+    return res.json({ success: true, intent })
+  } catch (err) {
+    console.error("CAPTURE DEPOSIT ERROR:", err)
+    return res.status(500).json({ error: "Could not capture deposit." })
+  }
+})
+app.post("/api/admin/bookings/:id/capture-deposit", requireAdminLogin, async (req, res) => {
+  try {
+    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
+
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found." })
+    }
+
+    if (!booking.depositPaymentIntentId) {
+      return res.status(400).json({ error: "No deposit hold found for this booking." })
+    }
+
+    const amountCents = centsFromDollars(req.body.amount)
+    const reason = String(req.body.reason || "Deposit charge").trim()
+
+    if (!amountCents || amountCents <= 0) {
+      return res.status(400).json({ error: "Capture amount is required." })
+    }
+
+    if (amountCents > 50000) {
+      return res.status(400).json({ error: "Cannot capture more than the $500 deposit." })
+    }
+
+    const intent = await stripe.paymentIntents.capture(booking.depositPaymentIntentId, {
+      amount_to_capture: amountCents,
+    })
+
+    await runAsync(
+      `
+      UPDATE bookings
+      SET depositStatus = 'partially_captured',
+          depositAmountCaptured = ?,
+          depositReleasedAt = datetime('now')
+      WHERE id = ?
+      `,
+      [amountCents, booking.id]
+    )
+
+    await sendEmail({
+      to: booking.customerEmail,
+      subject: `Security deposit charge for booking #${booking.id}`,
+      text: `
+A portion of your refundable security deposit was used.
+
+Booking ID: ${booking.id}
+Amount captured: $${dollarsFromCents(amountCents)}
+Reason: ${reason}
+
+The remaining authorization balance will be released by your card issuer.
+      `.trim(),
+    })
+
+    await sendEmail({
+      to: ADMIN_NOTIFICATION_EMAIL,
+      subject: `Deposit captured for booking #${booking.id}`,
+      text: `
+Deposit capture completed.
+
+Booking ID: ${booking.id}
+Customer: ${booking.waiverPrintedName || "No name"}
+Email: ${booking.customerEmail || "No email"}
+Amount captured: $${dollarsFromCents(amountCents)}
+Reason: ${reason}
+      `.trim(),
+    })
+
+    return res.json({ success: true, intent })
+  } catch (err) {
+    console.error("CAPTURE DEPOSIT ERROR:", err)
+    return res.status(500).json({ error: "Could not capture deposit." })
+  }
+})
+app.post("/api/admin/bookings/:id/release-deposit", requireAdminLogin, async (req, res) => {
+  try {
+    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
+
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found." })
+    }
+
+    if (!booking.depositPaymentIntentId) {
+      return res.status(400).json({ error: "No deposit hold found for this booking." })
+    }
+
+    const intent = await stripe.paymentIntents.cancel(booking.depositPaymentIntentId)
+
+    await runAsync(
+      `
+      UPDATE bookings
+      SET depositStatus = 'released',
+          depositAmountReleased = COALESCE(depositAmountAuthorized, 50000),
+          depositReleasedAt = datetime('now')
+      WHERE id = ?
+      `,
+      [booking.id]
+    )
+
+    await sendEmail({
+      to: booking.customerEmail,
+      subject: `Security deposit released for booking #${booking.id}`,
+      text: `
+Your security deposit authorization has been released.
+
+Booking ID: ${booking.id}
+Amount released: $500.00
+
+Please note your card issuer may take several business days to remove the pending authorization.
+      `.trim(),
+    })
+
+    await sendEmail({
+      to: ADMIN_NOTIFICATION_EMAIL,
+      subject: `Deposit released for booking #${booking.id}`,
+      text: `
+Security deposit released.
+
+Booking ID: ${booking.id}
+Customer: ${booking.waiverPrintedName || "No name"}
+Email: ${booking.customerEmail || "No email"}
+Amount released: $500.00
+      `.trim(),
+    })
+
+    return res.json({ success: true, intent })
+  } catch (err) {
+    console.error("RELEASE DEPOSIT ERROR:", err)
+    return res.status(500).json({ error: "Could not release deposit." })
+  }
+})
 
 // -----------------------------
 // ADMIN BOOKING UPDATE
