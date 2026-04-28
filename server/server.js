@@ -409,6 +409,61 @@ function allAsync(sql, params = []) {
     })
   })
 }
+async function syncBookingToSupabaseById(id) {
+  const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+
+  if (!booking) {
+    await supabase
+      .from("bookings")
+      .delete()
+      .eq("id", Number(id))
+
+    return
+  }
+
+  const payload = {
+    id: Number(booking.id),
+    rentalLabel: booking.rentalLabel,
+    boatType: booking.boatType,
+    date: booking.date,
+    rentalTime: booking.rentalTime,
+    towLocation: booking.towLocation,
+    towFee: booking.towFee,
+    waiverPrintedName: booking.waiverPrintedName,
+    waiverAccepted: Boolean(booking.waiverAccepted),
+    waiverAcceptedAt: booking.waiverAcceptedAt,
+    waiverStatus: booking.waiverStatus,
+    paymentStatus: booking.paymentStatus,
+    status: booking.status,
+    customerEmail: booking.customerEmail,
+    photoIdPath: booking.photoIdPath,
+    stripeSessionId: booking.stripeSessionId,
+    stripePaymentIntentId: booking.stripePaymentIntentId,
+    stripeCustomerId: booking.stripeCustomerId,
+    stripePaymentMethodId: booking.stripePaymentMethodId,
+    depositSetupSessionId: booking.depositSetupSessionId,
+    depositSetupIntentId: booking.depositSetupIntentId,
+    depositPaymentIntentId: booking.depositPaymentIntentId,
+    depositRequestedAt: booking.depositRequestedAt,
+    depositPlacedAt: booking.depositPlacedAt,
+    depositReleasedAt: booking.depositReleasedAt,
+    depositStatus: booking.depositStatus,
+    depositLinkSentAt: booking.depositLinkSentAt,
+    depositAuthorizedAt: booking.depositAuthorizedAt,
+    depositCaptureBefore: booking.depositCaptureBefore,
+    depositAmountAuthorized: booking.depositAmountAuthorized,
+    depositAmountCaptured: booking.depositAmountCaptured,
+    depositAmountReleased: booking.depositAmountReleased,
+    finalPacketSentAt: booking.finalPacketSentAt,
+    createdAt: booking.createdAt,
+  }
+
+  const { error } = await supabase
+    .from("bookings")
+    .upsert(payload)
+
+  if (error) throw error
+}
 
 async function getBasePricingRow(rentalLabel) {
   return getAsync(
