@@ -1261,7 +1261,7 @@ const res = await adminFetch("/api/admin/manual-booking", {
     setMessage("Denying booking...")
 
     try {
-      const res = await adminFetch(`/api/admin/deny/${id}`, {
+      const res = await adminFetch(`/api/admin/deny/${id}/deny`, {
         method: "POST",
       })
 
@@ -1480,10 +1480,36 @@ async function sendPaymentRequest(id) {
     }
   }
 
-  async function deleteBooking(id) {
-    setError("Delete booking is not available in the current backend.")
+async function deleteBooking(id) {
+  setError("")
+  setMessage("Deleting booking...")
+
+  try {
+    const res = await adminFetch(`/api/admin/bookings/${id}`, {
+      method: "DELETE",
+    })
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      setError(data.error || "Could not delete booking.")
+      setMessage("")
+      return
+    }
+
+    setMessage(`Booking ${id} deleted.`)
+    await loadAdminData()
+  } catch (err) {
+    console.error(err)
+    if (err.message === "ADMIN_AUTH_REQUIRED") {
+      handleAdminLogout()
+      setError("Please log in again.")
+    } else {
+      setError("Server error while deleting booking.")
+    }
     setMessage("")
   }
+}
 
   async function createBlockDate() {
     setError("")
