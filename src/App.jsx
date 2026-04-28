@@ -1318,12 +1318,12 @@ const res = await adminFetch("/api/admin/manual-booking", {
     }
   }
 
- async function sendPaymentRequest(id) {
+async function sendPaymentRequest(id) {
   setError("")
   setMessage("Sending payment request...")
 
   try {
-    const res = await adminFetch(`/api/admin/bookings/${id}/resend-payment-request`, {
+    const res = await adminFetch(`/api/admin/bookings/${id}/send-rental-charge`, {
       method: "POST",
     })
 
@@ -2031,11 +2031,12 @@ async function sendDepositCharge(id) {
                   <th style={styles.adminTh}>Date</th>
                   <th style={styles.adminTh}>Time</th>
                   <th style={styles.adminTh}>Tow</th>
-                  <th style={styles.adminTh}>Waiver</th>
-                  <th style={styles.adminTh}>Payment</th>
-                  <th style={styles.adminTh}>Deposit</th>
-                  <th style={styles.adminTh}>Status</th>
-                  <th style={styles.adminTh}>Actions</th>
+<th style={styles.adminTh}>Waiver</th>
+<th style={styles.adminTh}>Payment</th>
+<th style={styles.adminTh}>Amount</th>
+<th style={styles.adminTh}>Deposit</th>
+<th style={styles.adminTh}>Status</th>
+<th style={styles.adminTh}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -2123,6 +2124,9 @@ async function sendDepositCharge(id) {
                           {normalizeStatusLabel(booking.paymentStatus || "unpaid")}
                         </span>
                       </td>
+                      <td style={styles.adminTd}>
+  ${booking.pricing?.totalAmountDollars || "0.00"}
+</td>
                       <td style={styles.adminTd}>
                         <span style={statusPillStyle(booking.depositStatus || "not_scheduled")}>
                           {normalizeStatusLabel(booking.depositStatus || "not_scheduled")}
