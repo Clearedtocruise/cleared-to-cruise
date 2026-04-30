@@ -577,15 +577,19 @@ style={{
     </button>
 
 <div style={styles.lookupCard}>
-  <div>
-    <strong>
-      {testimonials[activeTestimonialIndex]?.fullName || "Customer"}
-    </strong>
-  </div>
+<div>
+  <strong>
+    {testimonials[activeTestimonialIndex]?.fullName || "Customer"}
+  </strong>
+</div>
 
-  <div style={{ marginTop: "8px" }}>
-    {testimonials[activeTestimonialIndex]?.message || ""}
-  </div>
+<div style={{ color: "#f5a623", fontSize: "18px", marginTop: "6px" }}>
+  {"★".repeat(Number(testimonials[activeTestimonialIndex]?.rating || 5))}
+</div>
+
+<div style={{ marginTop: "8px" }}>
+  {testimonials[activeTestimonialIndex]?.message || ""}
+</div>
 
   {Array.isArray(testimonials[activeTestimonialIndex]?.photos) &&
     testimonials[activeTestimonialIndex].photos.length > 0 && (
