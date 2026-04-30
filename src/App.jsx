@@ -674,17 +674,20 @@ style={{
     Rating
   </label>
 
-  <select
-    style={styles.input}
-    value={testimonialRating}
-    onChange={(e) => setTestimonialRating(Number(e.target.value))}
-  >
-    <option value={5}>★★★★★</option>
-    <option value={4}>★★★★</option>
-    <option value={3}>★★★</option>
-    <option value={2}>★★</option>
-    <option value={1}>★</option>
-  </select>
+  <div style={{ fontSize: "28px", color: "#f5a623", cursor: "pointer" }}>
+    {[1, 2, 3, 4, 5].map((star) => (
+      <span
+        key={star}
+        onClick={() => setTestimonialRating(star)}
+        style={{
+          marginRight: "4px",
+          opacity: star <= testimonialRating ? 1 : 0.25,
+        }}
+      >
+        ★
+      </span>
+    ))}
+  </div>
 </div>
 
 <div style={{ marginTop: "25px" }}>
