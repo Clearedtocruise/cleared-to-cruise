@@ -669,7 +669,23 @@ style={{
     {testimonialPhotos.length} photo{testimonialPhotos.length === 1 ? "" : "s"} selected
   </div>
 )}
+<div style={{ marginTop: "20px" }}>
+  <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>
+    Rating
+  </label>
 
+  <select
+    style={styles.input}
+    value={testimonialRating}
+    onChange={(e) => setTestimonialRating(Number(e.target.value))}
+  >
+    <option value={5}>★★★★★</option>
+    <option value={4}>★★★★</option>
+    <option value={3}>★★★</option>
+    <option value={2}>★★</option>
+    <option value={1}>★</option>
+  </select>
+</div>
 
 <div style={{ marginTop: "25px" }}>
   <button type="submit" style={styles.primaryButton}>
