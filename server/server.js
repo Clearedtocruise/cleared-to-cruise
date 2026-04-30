@@ -22,7 +22,7 @@ const app = express()
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_ANON_KEY
 )
 
 const PORT = Number(process.env.PORT || 5001)
@@ -421,26 +421,42 @@ async function syncBookingToSupabaseById(id) {
     return
   }
 
-const payload = {
-  id: Number(booking.id),
-  bookingId: String(booking.id),
-  rentalLabel: booking.rentalLabel,
-  rentalType: booking.boatType,
-  date: booking.date,
-  rentalTime: booking.rentalTime,
-  towLocation: booking.towLocation,
-  waiverPrintedName: booking.waiverPrintedName,
-  waiverAccepted: Boolean(booking.waiverAccepted),
-  waiverAcceptedAt: booking.waiverAcceptedAt,
-  waiverStatus: booking.waiverStatus,
-  paymentStatus: booking.paymentStatus,
-  bookingStatus: booking.status,
-  customerEmail: booking.customerEmail,
-  photoIdPath: booking.photoIdPath,
-  depositReleasedAt: booking.depositReleasedAt,
-  depositStatus: booking.depositStatus,
-  created_at: booking.created_at || booking.createdAt,
-}
+  const payload = {
+    id: Number(booking.id),
+    rentalLabel: booking.rentalLabel,
+    boatType: booking.boatType,
+    date: booking.date,
+    rentalTime: booking.rentalTime,
+    towLocation: booking.towLocation,
+    towFee: booking.towFee,
+    waiverPrintedName: booking.waiverPrintedName,
+    waiverAccepted: Boolean(booking.waiverAccepted),
+    waiverAcceptedAt: booking.waiverAcceptedAt,
+    waiverStatus: booking.waiverStatus,
+    paymentStatus: booking.paymentStatus,
+    status: booking.status,
+    customerEmail: booking.customerEmail,
+    photoIdPath: booking.photoIdPath,
+    stripeSessionId: booking.stripeSessionId,
+    stripePaymentIntentId: booking.stripePaymentIntentId,
+    stripeCustomerId: booking.stripeCustomerId,
+    stripePaymentMethodId: booking.stripePaymentMethodId,
+    depositSetupSessionId: booking.depositSetupSessionId,
+    depositSetupIntentId: booking.depositSetupIntentId,
+    depositPaymentIntentId: booking.depositPaymentIntentId,
+    depositRequestedAt: booking.depositRequestedAt,
+    depositPlacedAt: booking.depositPlacedAt,
+    depositReleasedAt: booking.depositReleasedAt,
+    depositStatus: booking.depositStatus,
+    depositLinkSentAt: booking.depositLinkSentAt,
+    depositAuthorizedAt: booking.depositAuthorizedAt,
+    depositCaptureBefore: booking.depositCaptureBefore,
+    depositAmountAuthorized: booking.depositAmountAuthorized,
+    depositAmountCaptured: booking.depositAmountCaptured,
+    depositAmountReleased: booking.depositAmountReleased,
+    finalPacketSentAt: booking.finalPacketSentAt,
+    createdAt: booking.createdAt,
+  }
 
   const { error } = await supabase
     .from("bookings")
@@ -902,15 +918,7 @@ if (!fs.existsSync(uploadsDir)) {
 app.use("/uploads", express.static(uploadsDir))
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => {
-      cb(null, uploadsDir)
-    },
-    filename: (_req, file, cb) => {
-      const safeName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, "_")
-      cb(null, `${Date.now()}-${safeName}`)
-    },
-  }),
+  storage: multer.memoryStorage(),
 })
 
 // -----------------------------
