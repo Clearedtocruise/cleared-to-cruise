@@ -2080,6 +2080,7 @@ if (!booking) {
 
     const session = await stripe.checkout.sessions.create({
       mode: "setup",
+      customer_creation: "always",
       currency: "usd",
       payment_method_types: ["card"],
       customer_email: normalizedBooking.customerEmail || undefined,
