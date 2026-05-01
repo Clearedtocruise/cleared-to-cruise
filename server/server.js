@@ -2038,7 +2038,7 @@ app.post("/api/deposit/:id", async (req, res) => {
       currency: "usd",
       payment_method_types: ["card"],
       customer_email: normalizedBooking.customerEmail || undefined,
-      success_url: `${SITE_URL}/success?bookingId=${normalizedBooking.id}`,
+    success_url: `${SITE_URL}/request-received?bookingId=${normalizedBooking.id}`,
       cancel_url: `${SITE_URL}/cancel`,
       metadata: {
         bookingId: String(normalizedBooking.id),
