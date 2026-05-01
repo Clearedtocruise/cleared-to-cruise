@@ -918,9 +918,14 @@ if (!fs.existsSync(uploadsDir)) {
 app.use("/uploads", express.static(uploadsDir))
 
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")
+      cb(null, `${Date.now()}-${safeName}`)
+    },
+  }),
 })
-
 // -----------------------------
 // SCHEMA + MIGRATIONS
 // -----------------------------
@@ -3034,7 +3039,7 @@ app.post("/api/admin/place-deposit/:id", requireAdminLogin, async (req, res) => 
     }
 
     const intent = await stripe.paymentIntents.create({
-      amount: 50000,
+      amount: 100,
       currency: "usd",
       customer: booking.stripeCustomerId,
       payment_method: booking.stripePaymentMethodId,
