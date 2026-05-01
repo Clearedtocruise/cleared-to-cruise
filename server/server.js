@@ -774,7 +774,40 @@ Paid Total: $${dollarsFromCents(amounts.totalAmount)}
         )
 
         const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [bookingId])
+if (booking && session.customer && paymentMethodId && booking.depositStatus !== "held") {
+  const holdIntent = await stripe.paymentIntents.create({
+    amount: 100, // test $1
+    currency: "usd",
+    customer: session.customer,
+    payment_method: paymentMethodId,
+    confirm: true,
+    capture_method: "manual",
+    off_session: true,
+    metadata: {
+      bookingId: String(bookingId),
+      type: "security_deposit_hold",
+    },
+  })
 
+  await runAsync(
+    `
+    UPDATE bookings
+    SET depositPaymentIntentId = ?,
+        depositPlacedAt = datetime('now'),
+        depositAuthorizedAt = datetime('now'),
+        depositStatus = 'held',
+        depositAmountAuthorized = ?
+    WHERE id = ?
+    `,
+    [
+      holdIntent.id,
+      Number(holdIntent.amount || 0),
+      bookingId,
+    ]
+  )
+
+  await syncBookingToSupabaseById(bookingId)
+}
         if (booking) {
           try {
             if (booking.customerEmail) {
