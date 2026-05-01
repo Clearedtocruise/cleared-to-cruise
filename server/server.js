@@ -2036,6 +2036,7 @@ app.post("/api/deposit/:id", async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       mode: "setup",
       currency: "usd",
+      payment_method_types: ["card"],
       customer_email: normalizedBooking.customerEmail || undefined,
       success_url: `${SITE_URL}/success?bookingId=${normalizedBooking.id}`,
       cancel_url: `${SITE_URL}/cancel`,
