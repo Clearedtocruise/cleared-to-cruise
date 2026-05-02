@@ -754,6 +754,8 @@ Paid Total: $${dollarsFromCents(amounts.totalAmount)}
           paymentMethodId = setupIntent.payment_method || null
         }
 
+const stripeCustomerId = session.customer || setupIntent.customer || null
+
         await runAsync(
           `
           UPDATE bookings
@@ -765,7 +767,7 @@ Paid Total: $${dollarsFromCents(amounts.totalAmount)}
           WHERE id = ?
           `,
           [
-            session.customer || null,
+            stripeCustomerId,
             paymentMethodId,
             session.id || null,
             session.setup_intent || null,
@@ -778,7 +780,7 @@ if (booking && session.customer && paymentMethodId && booking.depositStatus !== 
   const holdIntent = await stripe.paymentIntents.create({
     amount: 100, // test $1
     currency: "usd",
-    customer: session.customer,
+    customer: stripeCustomerId,
     payment_method: paymentMethodId,
     confirm: true,
     capture_method: "manual",
