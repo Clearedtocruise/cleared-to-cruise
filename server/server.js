@@ -2132,24 +2132,35 @@ success_url: `${SITE_URL}/deposit-authorized?bookingId=${normalizedBooking.id}`,
 // -----------------------------
 app.get("/api/admin/bookings", requireAdminLogin, async (_req, res) => {
   try {
-    let rows = []
+    let sqliteRows = []
+let supabaseRows = []
 
-    // Load local SQLite bookings first
-    rows = await allAsync(`SELECT * FROM bookings ORDER BY id DESC`)
+sqliteRows = await allAsync('SELECT * FROM bookings ORDER BY id DESC')
 
-    // If SQLite is empty, fall back to Supabase backup
-    if (!rows.length) {
-      const { data, error } = await supabase
-        .from("bookings")
-        .select("*")
-        .order("id", { ascending: false })
+if (supabase) {
+  const { data, error } = await supabase
+    .from("bookings")
+    .select("*")
+    .order("id", { ascending: false })
 
-      if (error) {
-        console.error("SUPABASE ADMIN BOOKINGS LOAD ERROR:", error)
-      } else if (Array.isArray(data)) {
-        rows = data
-      }
-    }
+  if (error) {
+    console.error("SUPABASE ADMIN BOOKINGS LOAD ERROR:", error)
+  } else if (Array.isArray(data)) {
+    supabaseRows = data
+  }
+}
+
+const byId = new Map()
+
+for (const row of supabaseRows) {
+  byId.set(String(row.id), row)
+}
+
+for (const row of sqliteRows) {
+  byId.set(String(row.id), row)
+}
+
+let rows = Array.from(byId.values()).sort((a, b) => Number(b.id) - Number(a.id))
 
     const enriched = await Promise.all(
       rows.map(async (row) => {
