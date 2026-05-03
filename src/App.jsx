@@ -34,6 +34,76 @@ function RequestReceived() {
 </div>
   )
 }
+function PaymentSuccess() {
+  return (
+    <div style={{ textAlign: "center", padding: "60px 20px" }}>
+      <h1
+        style={{
+          color: "#ffffff",
+          textShadow: "0 2px 6px rgba(0,0,0,0.8)"
+        }}
+      >
+        Rental Payment Received
+      </h1>
+
+      <p
+        style={{
+          marginTop: "20px",
+          fontSize: "20px",
+          color: "#ffffff",
+          textShadow: "0 2px 6px rgba(0,0,0,0.8)"
+        }}
+      >
+        Thank you. Your rental payment has been received and your booking is confirmed.
+      </p>
+
+      <p
+        style={{
+          marginTop: "10px",
+          color: "rgba(255,255,255,0.9)",
+          textShadow: "0 2px 6px rgba(0,0,0,0.8)"
+        }}
+      >
+        A receipt has been sent to your email.
+      </p>
+    </div>
+  )
+}
+function DepositAuthorized() {
+  return (
+    <div style={{ textAlign: "center", padding: "60px 20px" }}>
+      <h1
+        style={{
+          color: "#ffffff",
+          textShadow: "0 2px 6px rgba(0,0,0,0.8)"
+        }}
+      >
+        Security Deposit Authorized
+      </h1>
+
+      <p
+        style={{
+          marginTop: "20px",
+          fontSize: "18px",
+          color: "#ffffff",
+          textShadow: "0 2px 6px rgba(0,0,0,0.8)"
+        }}
+      >
+        Your refundable security deposit has been securely authorized.
+      </p>
+
+      <p
+        style={{
+          marginTop: "10px",
+          color: "rgba(255,255,255,0.85)",
+          textShadow: "0 2px 6px rgba(0,0,0,0.8)"
+        }}
+      >
+        Your reservation is confirmed. A temporary authorization hold has been placed on your card for the refundable security deposit. This is not a final charge unless damages, fuel reimbursement, or contract violations apply. Thank you for choosing Cleared to Cruise.
+      </p>
+    </div>
+  )
+}
 const API = "https://cleared-to-cruise-api.onrender.com"
 const HEADER_LOGO = "/images/cleared-to-cruise-main-heading.png"
 
@@ -2236,8 +2306,8 @@ async function sendDepositCharge(id) {
                             </button>
 <button
   type="button"
-  style={styles.adminSuccessButton}
-  onClick={() => approveBooking(booking.id)}
+  style={styles.adminDangerButton}
+  onClick={() => denyBooking(booking.id)}
 >
   Deny
 </button>
@@ -3921,6 +3991,8 @@ export default function App() {
         <Route path="/pay/:id" element={<PaymentPage />} />
         <Route path="/cancel" element={<CancelPage />} />
         <Route path="/request-received" element={<RequestReceived />} />
+        <Route path="/deposit-authorized" element={<DepositAuthorized />} />
+        <Route path="/payment-success" element={<PaymentSuccess />} />
       </Routes>
     </BrowserRouter>
   )

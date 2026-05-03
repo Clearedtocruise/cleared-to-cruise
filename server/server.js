@@ -674,6 +674,17 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
           `,
           [session.id || null, session.payment_intent || null, bookingId]
         )
+        if (supabase) {
+  await supabase
+    .from("bookings")
+    .update({
+      paymentStatus: "paid",
+      status: "confirmed",
+      stripeSessionId: session.id || null,
+      stripePaymentIntentId: session.payment_intent || null,
+    })
+    .eq("id", bookingId)
+}
 try {
   await syncBookingToSupabaseById(bookingId)
 } catch (err) {
@@ -2037,7 +2048,7 @@ if (!booking && supabase) {
         },
       ],
       customer_email: normalizedBooking.customerEmail || undefined,
-      success_url: `${SITE_URL}/success?bookingId=${normalizedBooking.id}`,
+      success_url: `${SITE_URL}/payment-success?bookingId=${normalizedBooking.id}`,
       cancel_url: `${SITE_URL}/cancel`,
       metadata: {
         bookingId: String(normalizedBooking.id),
@@ -2309,20 +2320,43 @@ Status: ${readableStatus}
 }
 
 async function approveBookingCore(id) {
-  const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+let booking = await getAsync('SELECT * FROM bookings WHERE id = ?', [id])
 
-  if (!booking) {
-    return { notFound: true }
+if (!booking && supabase) {
+  const { data, error } = await supabase
+    .from("bookings")
+    .select("*")
+    .eq("id", Number(id))
+    .maybeSingle()
+
+  if (!error && data) {
+    booking = data
   }
+}
 
- await runAsync(`UPDATE bookings SET status = 'approved_unpaid' WHERE id = ?`, [id])
+if (!booking) {
+  return { notFound: true }
+}
 
-const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+await runAsync('UPDATE bookings SET status = ? WHERE id = ?', ['approved_unpaid', id])
 
-try {
-  await syncBookingToSupabaseById(id)
-} catch (err) {
-  console.error("SUPABASE SYNC ERROR:", err)
+if (supabase) {
+  await supabase
+    .from("bookings")
+    .update({ status: "approved_unpaid" })
+    .eq("id", Number(id))
+}
+
+let updated = await getAsync('SELECT * FROM bookings WHERE id = ?', [id])
+
+if (!updated && supabase) {
+  const { data } = await supabase
+    .from("bookings")
+    .select("*")
+    .eq("id", Number(id))
+    .maybeSingle()
+
+  updated = data
 }
 
   const normalizedUpdated = {
@@ -2392,15 +2426,44 @@ ${depositUrl}
 }
 
 async function denyBookingCore(id) {
-  const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+let booking = await getAsync('SELECT * FROM bookings WHERE id = ?', [id])
 
-  if (!booking) {
-    return { notFound: true }
+if (!booking && supabase) {
+  const { data, error } = await supabase
+    .from("bookings")
+    .select("*")
+    .eq("id", Number(id))
+    .maybeSingle()
+
+  if (!error && data) {
+    booking = data
   }
+}
 
-  await runAsync(`UPDATE bookings SET status = 'denied' WHERE id = ?`, [id])
-  const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+if (!booking) {
+  return { notFound: true }
+}
 
+await runAsync('UPDATE bookings SET status = ? WHERE id = ?', ['denied', id])
+
+if (supabase) {
+  await supabase
+    .from("bookings")
+    .update({ status: "denied" })
+    .eq("id", Number(id))
+}
+
+let updated = await getAsync('SELECT * FROM bookings WHERE id = ?', [id])
+
+if (!updated && supabase) {
+  const { data } = await supabase
+    .from("bookings")
+    .select("*")
+    .eq("id", Number(id))
+    .maybeSingle()
+
+  updated = data
+}
   const normalizedUpdated = {
     ...updated,
     rentalLabel: normalizeRentalLabel(updated.rentalLabel),
@@ -2412,19 +2475,44 @@ async function denyBookingCore(id) {
 }
 
 async function confirmBookingCore(id) {
-  const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+let booking = await getAsync('SELECT * FROM bookings WHERE id = ?', [id])
 
-  if (!booking) {
-    return { notFound: true }
+if (!booking && supabase) {
+  const { data, error } = await supabase
+    .from("bookings")
+    .select("*")
+    .eq("id", Number(id))
+    .maybeSingle()
+
+  if (!error && data) {
+    booking = data
   }
+}
 
-  await runAsync(`UPDATE bookings SET status = 'confirmed' WHERE id = ?`, [id])
-  const updated = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [id])
+if (!booking) {
+  return { notFound: true }
+}
 
-  const normalizedUpdated = {
-    ...updated,
-    rentalLabel: normalizeRentalLabel(updated.rentalLabel),
-  }
+await runAsync('UPDATE bookings SET status = ? WHERE id = ?', ['confirmed', id])
+
+if (supabase) {
+  await supabase
+    .from("bookings")
+    .update({ status: "confirmed" })
+    .eq("id", Number(id))
+}
+
+let updated = await getAsync('SELECT * FROM bookings WHERE id = ?', [id])
+
+if (!updated && supabase) {
+  const { data } = await supabase
+    .from("bookings")
+    .select("*")
+    .eq("id", Number(id))
+    .maybeSingle()
+
+  updated = data
+}
 
   await sendStatusEmails(normalizedUpdated, "confirmed")
 
@@ -4081,22 +4169,31 @@ app.post("/api/admin/manual-booking", requireAdminLogin, async (req, res) => {
 })
 app.delete("/api/admin/bookings/:id", requireAdminLogin, async (req, res) => {
   try {
-    const result = await runAsync(`DELETE FROM bookings WHERE id = ?`, [req.params.id])
+    const id = Number(req.params.id)
 
-    if (result.changes === 0) {
-      return res.status(404).json({ error: "Booking not found." })
+    // delete local copy if it exists
+    await runAsync(
+      'DELETE FROM bookings WHERE id = ?',
+      [id]
+    )
+
+    // delete Supabase copy
+    if (supabase) {
+      await supabase
+        .from("bookings")
+        .delete()
+        .eq("id", id)
     }
 
-    try {
-      await syncBookingToSupabaseById(req.params.id)
-    } catch (err) {
-      console.error("SUPABASE SYNC ERROR AFTER DELETE:", err)
-    }
-
-    return res.json({ success: true, message: "Booking deleted." })
+    return res.json({
+      success: true,
+      message: "Booking deleted."
+    })
   } catch (err) {
     console.error("DELETE BOOKING ERROR:", err)
-    return res.status(500).json({ error: "Could not delete booking." })
+    return res.status(500).json({
+      error: "Could not delete booking."
+    })
   }
 })
 // -----------------------------
