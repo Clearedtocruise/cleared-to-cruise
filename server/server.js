@@ -1972,7 +1972,19 @@ Date: ${normalizedBooking.date || "Not provided"}
 // -----------------------------
 app.post("/api/create-checkout/:id", async (req, res) => {
   try {
-    const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [req.params.id])
+let booking = await getAsync('SELECT * FROM bookings WHERE id = ?', [req.params.id])
+
+if (!booking && supabase) {
+  const { data, error } = await supabase
+    .from("bookings")
+    .select("*")
+    .eq("id", Number(req.params.id))
+    .maybeSingle()
+
+  if (!error && data) {
+    booking = data
+  }
+}
 
     if (!booking) {
       return res.status(404).json({ error: "Booking not found." })
