@@ -776,7 +776,7 @@ const stripeCustomerId = session.customer || setupIntent.customer || null
         )
 
         const booking = await getAsync(`SELECT * FROM bookings WHERE id = ?`, [bookingId])
-if (booking && session.customer && paymentMethodId && booking.depositStatus !== "held") {
+if (booking && stripeCustomerId && paymentMethodId && booking.depositStatus !== "held") {
   const holdIntent = await stripe.paymentIntents.create({
     amount: 100, // test $1
     currency: "usd",
