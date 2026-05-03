@@ -2086,7 +2086,7 @@ if (!booking) {
       currency: "usd",
       payment_method_types: ["card"],
       customer_email: normalizedBooking.customerEmail || undefined,
-    success_url: `${SITE_URL}/request-received?bookingId=${normalizedBooking.id}`,
+success_url: `${SITE_URL}/deposit-authorized?bookingId=${normalizedBooking.id}`,
       cancel_url: `${SITE_URL}/cancel`,
       metadata: {
         bookingId: String(normalizedBooking.id),
