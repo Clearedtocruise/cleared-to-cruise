@@ -3199,7 +3199,7 @@ app.post("/api/admin/place-deposit/:id", requireAdminLogin, async (req, res) => 
     }
 
     const intent = await stripe.paymentIntents.create({
-      amount: 100,
+      amount: 50000,
       currency: "usd",
       customer: booking.stripeCustomerId,
       payment_method: booking.stripePaymentMethodId,
