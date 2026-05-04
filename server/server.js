@@ -248,6 +248,62 @@ const mailer =
       })
     : null
 
+    const COMPANY_LOGO_URL = "https://www.clearedtocruiserentals.com/images/cleared-to-cruise-logo.png"
+
+const CUSTOMER_EMAIL_FOOTER_HTML = `
+  <hr style="margin:28px 0;border:none;border-top:1px solid #ddd;" />
+
+  <h3>Important Lake Contacts</h3>
+  <p>
+    <strong>Castaic Lake Recreation</strong><br/>
+    32132 Castaic Lake Drive<br/>
+    Castaic, CA 91384<br/>
+    Phone: (661) 257-4050
+  </p>
+
+  <p>
+    <strong>Pyramid Lake Recreation</strong><br/>
+    43101 Pyramid Lake Road<br/>
+    Lebec, CA 93243<br/>
+    Phone: (661) 944-8748
+  </p>
+
+  <p>
+    <strong>Piru Lake Recreation</strong><br/>
+    4780 Piru Canyon Road<br/>
+    Piru, CA 93040<br/>
+    Phone: (805) 521-1500
+  </p>
+
+  <hr style="margin:28px 0;border:none;border-top:1px solid #ddd;" />
+
+  <p>
+    Thank you for choosing <strong>Cleared to Cruise</strong><br/><br/>
+    Timothy Barrett<br/>
+    Owner | Cleared to Cruise LLC<br/><br/>
+    Phone: 805-616-5973<br/>
+    Email: clearedtocruise@gmail.com<br/>
+    Website: www.clearedtocruiserentals.com
+  </p>
+`
+
+function customerEmailTemplate(contentHtml) {
+  return `
+    <div style="font-family: Arial, sans-serif; color:#222; line-height:1.5; max-width:680px; margin:0 auto;">
+      <div style="text-align:center; margin-bottom:24px;">
+        <img
+          src="${COMPANY_LOGO_URL}"
+          alt="Cleared to Cruise"
+          style="max-width:220px; height:auto;"
+        />
+      </div>
+
+      ${contentHtml}
+
+      ${CUSTOMER_EMAIL_FOOTER_HTML}
+    </div>
+  `
+}
 async function sendEmail({ to, subject, text, html, attachments = [] }) {
   if (!to) {
     console.warn("Email skipped: missing recipient.")
